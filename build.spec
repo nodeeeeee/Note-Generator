@@ -6,9 +6,13 @@
 
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 HERE = Path(SPECPATH)   # noqa: F821 — injected by PyInstaller
+
+# Collect flet_desktop data/binaries (includes the bundled Flutter client)
+fd_datas, fd_binaries, fd_hiddenimports = collect_all("flet_desktop")
 
 # All pipeline scripts shipped alongside the GUI
 pipeline_scripts = [
@@ -20,9 +24,9 @@ pipeline_scripts = [
 a = Analysis(
     [str(HERE / "gui.py")],
     pathex=[str(HERE)],
-    binaries=[],
-    datas=pipeline_scripts,
-    hiddenimports=[
+    binaries=fd_binaries,
+    datas=pipeline_scripts + fd_datas,
+    hiddenimports=fd_hiddenimports + [
         "flet",
         "flet.fastapi",
         "flet_core",
