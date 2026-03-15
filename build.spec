@@ -11,8 +11,12 @@ from PyInstaller.utils.hooks import collect_all
 block_cipher = None
 HERE = Path(SPECPATH)   # noqa: F821 — injected by PyInstaller
 
-# Collect flet_desktop data/binaries (includes the bundled Flutter client)
-fd_datas, fd_binaries, fd_hiddenimports = collect_all("flet_desktop")
+# Collect all data/binaries from flet packages
+# flet_desktop: bundled Flutter client binary
+# flet + flet_core: icons.json and other package data files
+fd_datas,    fd_binaries,    fd_hidden    = collect_all("flet_desktop")
+fc_datas,    fc_binaries,    fc_hidden    = collect_all("flet_core")
+flet_datas,  flet_binaries,  flet_hidden  = collect_all("flet")
 
 # All pipeline scripts shipped alongside the GUI
 pipeline_scripts = [
@@ -24,9 +28,9 @@ pipeline_scripts = [
 a = Analysis(
     [str(HERE / "gui.py")],
     pathex=[str(HERE)],
-    binaries=fd_binaries,
-    datas=pipeline_scripts + fd_datas,
-    hiddenimports=fd_hiddenimports + [
+    binaries=fd_binaries + fc_binaries + flet_binaries,
+    datas=pipeline_scripts + fd_datas + fc_datas + flet_datas,
+    hiddenimports=fd_hidden + fc_hidden + flet_hidden + [
         "flet",
         "flet.fastapi",
         "flet_core",
