@@ -1052,21 +1052,42 @@ def _find_alignment(slide_path: Path, course_dir: Path) -> Path | None:
 
 def _discover_lectures(course_dir: Path) -> list[LectureData]:
     exts    = {".pdf", ".pptx", ".ppt", ".docx", ".doc"}
-    mat_dir = course_dir / "materials" / "LectureNotes"
-    if not mat_dir.exists():
-        mat_dir = course_dir / "materials"
 
-    slide_files = sorted([
-        p for p in mat_dir.rglob("*")
-        if p.suffix.lower() in exts and "image_cache" not in p.name
-    ])
+    # Common lecture-slide subfolder names, checked in priority order.
+    _LECTURE_SUBDIRS = [
+        "LectureNotes", "Lecture Slides", "Lecture Notes",
+        "Lectures", "Slides", "lecture_notes", "lecture_slides",
+    ]
+
+    mat_dir = course_dir / "materials"
+    lecture_subdir: Path | None = None
+    for name in _LECTURE_SUBDIRS:
+        candidate = mat_dir / name
+        if candidate.exists():
+            lecture_subdir = candidate
+            break
+
+    if lecture_subdir is not None:
+        slide_files = sorted([
+            p for p in lecture_subdir.rglob("*")
+            if p.suffix.lower() in exts and "image_cache" not in p.name
+        ])
+    else:
+        # Fall back to direct children of materials/ only — never recurse into
+        # subdirectories (Tutorials/, Assignments/, Midterm/ …) to avoid
+        # treating every course PDF as a lecture slide file.
+        slide_files = sorted([
+            p for p in mat_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in exts
+            and "image_cache" not in p.name
+        ])
 
     # Group files by lecture number; files without a number get a unique high index
     from collections import defaultdict
     by_num: dict[int, list[Path]] = defaultdict(list)
     auto_num = 1000
     for sp in slide_files:
-        m = re.search(r"(?<![a-zA-Z])[Ll](?:ec(?:ture)?)?[-_]?0*(\d+)", sp.stem)
+        m = re.search(r"(?<![a-zA-Z])[Ll](?:ec(?:ture)?)?[-_ ]?0*(\d+)", sp.stem)
         if m:
             lec_num = int(m.group(1))
         else:

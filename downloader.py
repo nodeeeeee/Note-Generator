@@ -121,25 +121,252 @@ def get_course_by_id(canvas: Canvas, course_id: int):
 #  VIDEO SECTION
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Canvas external-tool ID for the "Videos/Panopto" course navigation tab
+_PANOPTO_TAB_TOOL_ID = 128
+
+
 def _find_panopto_items(canvas: Canvas, course) -> list[dict]:
-    """Scan all modules in a course for Panopto ExternalTool items."""
-    videos = []
+    """
+    Discover all Panopto sessions for a course using three strategies:
+
+    1. Module ExternalTool items  (e.g. CS3210 — each lecture linked in a module)
+    2. Panopto folder API         (e.g. CS2105 — sessions stored in a Panopto folder)
+    3. Canvas Pages scan          (e.g. CS2101 — Viewer.aspx links embedded in pages)
+
+    All three are merged and de-duplicated by session UUID.
+    """
+    seen_ids: set[str] = set()
+    videos:   list[dict] = []
+
+    def _add(v: dict) -> None:
+        uid = str(v["item_id"])
+        if uid not in seen_ids:
+            seen_ids.add(uid)
+            videos.append(v)
+
+    # ── Strategy 1: module ExternalTool items ─────────────────────────────────
     try:
         for module in course.get_modules():
             for item in module.get_module_items():
                 if item.type == "ExternalTool":
                     url = getattr(item, "external_url", "") or ""
                     if "panopto" in url.lower():
-                        videos.append({
+                        _add({
                             "course_id":   course.id,
                             "course_name": course.name,
                             "module_name": module.name,
                             "title":       item.title,
                             "lti_url":     url,
-                            "item_id":     item.id,
+                            "item_id":     item.id,   # integer Canvas item ID
+                            "viewer_url":  None,       # resolved via LTI launch
                         })
     except Exception as e:
-        tqdm.write(f"  [warn] course {course.id}: {e}")
+        tqdm.write(f"  [warn] modules scan {course.id}: {e}")
+
+    # ── Strategy 2: Panopto folder API (Videos/Panopto tab) ───────────────────
+    try:
+        folder_id, panopto_cookies, bearer_token = _get_panopto_tab_folder(course.id)
+        if folder_id:
+            for s in _iter_panopto_folder(folder_id, panopto_cookies, bearer_token=bearer_token):
+                viewer_url = (f"https://{PANOPTO_HOST}/Panopto/Pages/Viewer.aspx"
+                              f"?id={s['session_id']}")
+                _add({
+                    "course_id":   course.id,
+                    "course_name": course.name,
+                    "module_name": s.get("folder_name", "Videos/Panopto"),
+                    "title":       s["name"],
+                    "lti_url":     None,
+                    "item_id":     s["session_id"],   # UUID string used as key
+                    "viewer_url":  viewer_url,
+                    "_panopto_cookies": panopto_cookies,
+                })
+    except Exception as e:
+        tqdm.write(f"  [warn] Panopto folder scan {course.id}: {e}")
+
+    # ── Strategy 3: Canvas Pages scan (fallback only) ─────────────────────────
+    # Only run if strategies 1+2 found nothing.  Pages embed Panopto using
+    # delivery/embed IDs that differ from SessionIDs and cannot be resolved
+    # as standalone sessions, so we avoid false entries when the folder API
+    # already provides complete coverage.
+    if not videos:
+        try:
+            for v in _find_panopto_in_pages(course):
+                _add(v)
+        except Exception as e:
+            tqdm.write(f"  [warn] pages scan {course.id}: {e}")
+
+    return videos
+
+
+def _get_panopto_tab_folder(course_id: int) -> tuple[str | None, list[dict], str | None]:
+    """
+    Launch the Videos/Panopto tab via Canvas sessionless LTI, navigate with
+    Playwright, capture the root Panopto folder ID, auth cookies, and OAuth
+    Bearer token.
+    Returns (folder_id, panopto_cookies, bearer_token).
+    """
+    from playwright.sync_api import sync_playwright
+
+    r = requests.get(
+        f"{CANVAS_URL}/api/v1/courses/{course_id}/external_tools/sessionless_launch"
+        f"?id={_PANOPTO_TAB_TOOL_ID}&launch_type=course_navigation",
+        headers=_canvas_headers(),
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return None, [], None
+    launch_url = r.json().get("url")
+    if not launch_url:
+        return None, [], None
+
+    folder_id:    str | None = None
+    bearer_token: str | None = None
+    cookies:      list[dict] = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx     = browser.new_context()
+        page    = ctx.new_page()
+
+        def _on_request(req: object) -> None:
+            nonlocal folder_id, bearer_token
+            m = re.search(r"folderID=([0-9a-f-]{36})", req.url, re.IGNORECASE)
+            if m and folder_id is None:
+                folder_id = m.group(1)
+            # Capture the OAuth Bearer token issued to the embedded page.
+            # The WCF GetSessions endpoint requires it to return Subfolders.
+            auth = req.headers.get("authorization", "")
+            if auth.startswith("Bearer ") and bearer_token is None:
+                bearer_token = auth[len("Bearer "):]
+
+        page.on("request", _on_request)
+        try:
+            page.goto(launch_url, wait_until="networkidle", timeout=60000)
+            time.sleep(3)
+            cookies = [c for c in ctx.cookies()
+                       if "panopto" in c.get("domain", "").lower()]
+        except Exception as e:
+            tqdm.write(f"  [warn] Playwright (Panopto tab) course {course_id}: {e}")
+        finally:
+            browser.close()
+
+    return folder_id, cookies, bearer_token
+
+
+def _iter_panopto_folder(
+    folder_id:    str,
+    cookies:      list[dict],
+    folder_name:  str = "Videos/Panopto",
+    bearer_token: str | None = None,
+    _sess:        "requests.Session | None" = None,
+) -> list[dict]:
+    """
+    Recursively list all sessions in a Panopto folder via the WCF GetSessions
+    endpoint.
+
+    Key requirements discovered by request inspection:
+    - The WCF endpoint requires an OAuth Bearer token (captured by Playwright)
+      to return the Subfolders list; cookie-only requests receive Subfolders=None.
+    - getFolderData=true must be set to receive the Subfolders field at all.
+    - Duration filter: entries with no Duration are navigation placeholders
+      (e.g. "Home") not actual recordings.
+
+    Returns list of {session_id, name, folder_name}.
+    """
+    if _sess is None:
+        _sess = requests.Session()
+        for ck in cookies:
+            _sess.cookies.set(ck["name"], ck["value"], domain=ck.get("domain", ""))
+
+    headers = {"Content-Type": "application/json"}
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
+
+    results: list[dict] = []
+
+    r = _sess.post(
+        f"https://{PANOPTO_HOST}/Panopto/Services/Data.svc/GetSessions",
+        json={"queryParameters": {
+            "folderID":                   folder_id,
+            "startIndex":                 0,
+            "maxResults":                 500,
+            "sortColumn":                 1,
+            "sortAscending":              True,
+            "getFolderData":              True,   # required to get Subfolders list
+            "includeArchived":            True,
+            "includePlaylists":           True,
+            "includePlaceholderSessions": False,
+        }},
+        headers=headers,
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return results
+
+    d = r.json().get("d") or {}
+
+    for s in d.get("Results") or []:
+        # DeliveryID is what Viewer.aspx and DeliveryInfo.aspx use for streaming.
+        # SessionID is the internal DB identifier and does NOT work with DeliveryInfo.
+        sid      = s.get("DeliveryID") or s.get("SessionID")
+        name     = s.get("SessionName", "")
+        duration = s.get("Duration")        # None/0 → navigation placeholder, not a video
+        if sid and name and duration:
+            results.append({
+                "session_id":  sid,
+                "name":        name,
+                "folder_name": folder_name,
+            })
+
+    for sf in d.get("Subfolders") or []:
+        sf_id   = sf.get("ID") or sf.get("FolderID") or sf.get("Id")
+        sf_name = sf.get("Name") or folder_name
+        if sf_id:
+            results.extend(
+                _iter_panopto_folder(sf_id, cookies, sf_name, bearer_token, _sess)
+            )
+
+    return results
+
+
+def _find_panopto_in_pages(course) -> list[dict]:
+    """
+    Scan Canvas Pages for embedded Panopto Viewer.aspx links.
+    Returns video dicts for each unique session UUID found.
+    """
+    videos: list[dict] = []
+    seen: set[str] = set()
+
+    try:
+        for page_stub in course.get_pages():
+            page = course.get_page(page_stub.url)
+            body = getattr(page, "body", "") or ""
+            if "panopto" not in body.lower():
+                continue
+            # Match ?id=UUID  (Viewer.aspx or Embed.aspx links)
+            for uid in re.findall(
+                r"[?&]id=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}"
+                r"-[0-9a-f]{4}-[0-9a-f]{12})",
+                body, re.IGNORECASE,
+            ):
+                uid = uid.lower()
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                viewer_url = (f"https://{PANOPTO_HOST}/Panopto/Pages/Viewer.aspx"
+                              f"?id={uid}")
+                videos.append({
+                    "course_id":   course.id,
+                    "course_name": course.name,
+                    "module_name": page_stub.title,
+                    "title":       page_stub.title,
+                    "lti_url":     None,
+                    "item_id":     uid,   # UUID string
+                    "viewer_url":  viewer_url,
+                })
+    except Exception as e:
+        tqdm.write(f"  [warn] pages scan {course.id}: {e}")
+
     return videos
 
 
@@ -252,18 +479,32 @@ def _get_stream_url(session_id: str, cookies: list[dict]) -> str | None:
     return None
 
 
-def download_video(video: dict, manifest: dict, base_dir: Path) -> bool:
-    """Download a single Panopto video with a tqdm progress bar."""
+def download_video(video: dict, manifest: dict, base_dir: Path) -> bool | None:
+    """Download a single Panopto video with a tqdm progress bar.
+
+    Returns:
+      True  — video was actually downloaded now
+      None  — video was skipped (already done or file existed)
+      False — download failed
+
+    Handles two source types:
+      • Module ExternalTool (item_id is an integer): LTI sessionless launch →
+        Playwright → extract session_id + cookies → stream URL.
+      • Folder/Page session (item_id is a UUID string, viewer_url is set):
+        use cached Panopto cookies from discovery, or re-authenticate via the
+        Videos/Panopto tab, then call stream URL directly.
+    """
     import PanoptoDownloader
 
-    item_id   = video["item_id"]
-    course_id = video["course_id"]
-    title     = video["title"]
-    key       = str(item_id)
+    item_id    = video["item_id"]
+    course_id  = video["course_id"]
+    title      = video["title"]
+    viewer_url = video.get("viewer_url")
+    key        = str(item_id)
 
     if manifest.get(key, {}).get("status") == "done":
         tqdm.write(f"  [skip] Already downloaded: {title}")
-        return True
+        return None
 
     out_dir  = base_dir / str(course_id) / "videos"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -272,21 +513,35 @@ def download_video(video: dict, manifest: dict, base_dir: Path) -> bool:
     if out_path.exists():
         tqdm.write(f"  [skip] File exists: {out_path}")
         manifest[key] = {"status": "done", "path": str(out_path)}
-        return True
+        return None
 
-    tqdm.write(f"  Fetching launch URL for: {title}")
-    launch_url = _get_sessionless_launch_url(course_id, item_id)
-    if not launch_url:
-        tqdm.write(f"  [error] Could not get launch URL")
-        manifest[key] = {"status": "error", "title": title}
-        return False
-
-    tqdm.write(f"  Launching Panopto session...")
-    session_id, cookies = _get_panopto_session(launch_url)
-    if not session_id:
-        tqdm.write(f"  [error] Could not get Panopto session ID")
-        manifest[key] = {"status": "error", "title": title}
-        return False
+    # ── Resolve session_id + cookies ──────────────────────────────────────────
+    if viewer_url:
+        # Non-module session: session_id is the UUID stored as item_id.
+        session_id = str(item_id)
+        # Use cookies cached during discovery if available, otherwise re-auth.
+        cookies = video.get("_panopto_cookies") or []
+        if not cookies:
+            tqdm.write(f"  Re-authenticating via Videos/Panopto tab…")
+            _, cookies, _bt = _get_panopto_tab_folder(course_id)
+        if not cookies:
+            tqdm.write(f"  [error] Could not obtain Panopto auth cookies")
+            manifest[key] = {"status": "error", "title": title}
+            return False
+    else:
+        # Module ExternalTool: classic LTI launch path.
+        tqdm.write(f"  Fetching launch URL for: {title}")
+        launch_url = _get_sessionless_launch_url(course_id, item_id)
+        if not launch_url:
+            tqdm.write(f"  [error] Could not get launch URL")
+            manifest[key] = {"status": "error", "title": title}
+            return False
+        tqdm.write(f"  Launching Panopto session…")
+        session_id, cookies = _get_panopto_session(launch_url)
+        if not session_id:
+            tqdm.write(f"  [error] Could not get Panopto session ID")
+            manifest[key] = {"status": "error", "title": title}
+            return False
 
     stream_url = _get_stream_url(session_id, cookies)
     if not stream_url:
@@ -345,6 +600,7 @@ def get_course_files(course) -> list[dict]:
                 "size":         getattr(f, "size", 0) or 0,
                 "url":          f.url,
                 "mime_class":   getattr(f, "mime_class", ""),
+                "folder_id":    f.folder_id,
                 "folder_path":  folder_map.get(f.folder_id, ""),
                 "updated_at":   getattr(f, "updated_at", ""),
                 "course_id":    course.id,
@@ -435,6 +691,130 @@ def print_material_list(files: list[dict], logs: dict[int, dict]) -> None:
     print()
     print(f"  Total: {len(files)} file(s)")
     print()
+
+
+def _download_folder_zip(
+    folder_id: int,
+    folder_path: str,
+    course_id: int,
+    files_in_folder: list[dict],
+    log: dict,
+    base_dir: Path,
+) -> tuple[int, int, int]:
+    """
+    Download a Canvas folder as a single ZIP request, then extract.
+    Returns (n_downloaded, n_skipped, n_errors).
+    Falls back to individual download_material() calls if the ZIP
+    endpoint is unavailable or returns bad data.
+    """
+    import io, zipfile
+
+    pending = [f for f in files_in_folder
+               if not (str(f["id"]) in log
+                       and Path(log[str(f["id"])]["path"]).exists())]
+    skipped = len(files_in_folder) - len(pending)
+    if not pending:
+        return 0, skipped, 0
+
+    dest_dir = base_dir / str(course_id) / "materials"
+    if folder_path:
+        dest_dir = dest_dir / Path(*[_sanitize(p) for p in folder_path.split("/")])
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    folder_label = folder_path or "/"
+    tqdm.write(f"\n  Folder: {folder_label}  ({len(pending)} pending / {skipped} already done)")
+
+    # ── Request folder ZIP ─────────────────────────────────────────────────────
+    r = requests.get(
+        f"{CANVAS_URL}/api/v1/folders/{folder_id}/download",
+        headers=_canvas_headers(),
+        allow_redirects=True,
+        stream=True,
+        timeout=300,
+    )
+
+    def _fallback() -> tuple[int, int, int]:
+        dl = err = 0
+        for f in pending:
+            if download_material(f, log, base_dir):
+                dl += 1
+            else:
+                err += 1
+        return dl, skipped, err
+
+    if r.status_code != 200:
+        tqdm.write(f"    [warn] ZIP not available (HTTP {r.status_code}), falling back to individual downloads")
+        return _fallback()
+
+    content_type = r.headers.get("Content-Type", "")
+    if "zip" not in content_type and "octet-stream" not in content_type:
+        tqdm.write(f"    [warn] Unexpected content-type '{content_type}', falling back")
+        return _fallback()
+
+    # ── Stream the ZIP ─────────────────────────────────────────────────────────
+    total_bytes = int(r.headers.get("Content-Length", 0))
+    bar = tqdm(
+        total=total_bytes or None,
+        desc=f"  [{folder_label}] zip",
+        unit="B", unit_scale=True, unit_divisor=1024,
+        bar_format="{desc} |{bar}| {n_fmt}/{total_fmt} [{rate_fmt}]",
+        leave=True,
+    )
+    buf = io.BytesIO()
+    for chunk in r.iter_content(chunk_size=65536):
+        if chunk:
+            buf.write(chunk)
+            bar.update(len(chunk))
+    bar.close()
+    buf.seek(0)
+
+    # ── Extract ────────────────────────────────────────────────────────────────
+    try:
+        zf = zipfile.ZipFile(buf)
+    except zipfile.BadZipFile as e:
+        tqdm.write(f"    [warn] Bad ZIP ({e}), falling back to individual downloads")
+        return _fallback()
+
+    # Build name → member map (strip internal directory prefixes)
+    name_to_member: dict[str, str] = {}
+    with zf:
+        for member in zf.namelist():
+            fname = Path(member).name
+            if fname:                            # skip directory entries
+                name_to_member[fname] = member
+
+        # ── Match each pending file to a ZIP entry and write to disk ──────────
+        now = datetime.now(timezone.utc).isoformat()
+        dl = err = 0
+        for f in pending:
+            sanitized = _sanitize(f["display_name"])
+            member = name_to_member.get(sanitized) or name_to_member.get(f["display_name"])
+            if member is None:
+                tqdm.write(f"    [warn] Not found in ZIP: {f['display_name']} — downloading individually")
+                if download_material(f, log, base_dir):
+                    dl += 1
+                else:
+                    err += 1
+                continue
+
+            target = dest_dir / sanitized
+            try:
+                target.write_bytes(zf.read(member))
+            except Exception as e:
+                tqdm.write(f"    [error] Failed to write {target.name}: {e}")
+                err += 1
+                continue
+            tqdm.write(f"    Extracted → {target.name}")
+            log[str(f["id"])] = {
+                "display_name":  f["display_name"],
+                "folder":        folder_path,
+                "size":          target.stat().st_size,
+                "path":          str(target),
+                "downloaded_at": now,
+            }
+            dl += 1
+
+    return dl, skipped, err
 
 
 def download_material(file_info: dict, log: dict, base_dir: Path) -> bool:
@@ -611,7 +991,7 @@ def main() -> None:
         videos   = discover_videos(canvas, args.course)
         manifest = _load_json(MANIFEST_FILE)
         num_key  = "course_num" if args.course else "global_num"
-        targets  = {v for v in videos if v[num_key] in args.download_video}
+        targets  = [v for v in videos if v[num_key] in args.download_video]
         missing  = set(args.download_video) - {v[num_key] for v in targets}
         if missing:
             print(f"  [warn] No video(s) found for number(s): {sorted(missing)}")
@@ -621,9 +1001,9 @@ def main() -> None:
         print(f"\nDownloading {len(targets)} video(s):")
         for i, video in enumerate(sorted(targets, key=lambda v: v[num_key])):
             print(f"\n[{i+1}/{len(targets)}] {video['title']}")
-            download_video(video, manifest, base_dir)
+            result = download_video(video, manifest, base_dir)
             _save_json(MANIFEST_FILE, manifest)
-            if args.secretly and i < len(targets) - 1:
+            if args.secretly and result is True and i < len(targets) - 1:
                 _secretly_wait_video()
 
         print(f"\nDone.")
@@ -642,9 +1022,9 @@ def main() -> None:
 
         for i, video in enumerate(pending):
             print(f"\n[{i+1}/{len(pending)}] {video['title']}")
-            download_video(video, manifest, base_dir)
+            result = download_video(video, manifest, base_dir)
             _save_json(MANIFEST_FILE, manifest)
-            if args.secretly and i < len(pending) - 1:
+            if args.secretly and result is True and i < len(pending) - 1:
                 _secretly_wait_video()
 
         print(f"\nDone.")
@@ -688,17 +1068,19 @@ def main() -> None:
         for f in targets:
             by_course.setdefault(f["course_id"], []).append(f)
 
-        prev_cid: int | None = None
+        prev_downloaded = False
         for cid, cfiles in by_course.items():
             log_path = base_dir / str(cid) / "materials" / "download_log.json"
             log      = _load_json(log_path)
             print(f"\nCourse {cid}:")
-            for i, f in enumerate(cfiles):
-                download_material(f, log, base_dir)
-                _save_json(log_path, log)
-            if args.secretly and prev_cid is not None:
+            if args.secretly and prev_downloaded:
                 _secretly_wait_dir()
-            prev_cid = cid
+            course_dl = 0
+            for i, f in enumerate(cfiles):
+                if download_material(f, log, base_dir):
+                    course_dl += 1
+                _save_json(log_path, log)
+            prev_downloaded = course_dl > 0
 
         print(f"\nDone.")
         return
@@ -710,7 +1092,7 @@ def main() -> None:
         else:
             courses = get_academic_courses(canvas)
 
-        total_dl = total_sk = total_err = 0
+        total_dl = total_sk = 0
 
         for ci, course in enumerate(courses):
             print(f"\n{'='*70}")
@@ -737,39 +1119,37 @@ def main() -> None:
             else:
                 to_download = files
 
-            # Track previous folder for secretly waits
-            prev_folder: str | None = None
-            dl = sk = err = 0
-
+            # Group pending files by folder for bulk ZIP downloads
+            by_folder: dict[tuple[int, str], list[dict]] = {}
             for f in to_download:
-                fid = str(f["id"])
-                if fid in log and Path(log[fid]["path"]).exists():
-                    sk += 1
-                    tqdm.write(f"  [skip] {f['display_name']}")
-                    continue
+                key = (f.get("folder_id", 0), f["folder_path"])
+                by_folder.setdefault(key, []).append(f)
 
-                # Secretly: wait between folders
-                cur_folder = f["folder_path"]
-                if args.secretly and prev_folder is not None and cur_folder != prev_folder:
-                    _secretly_wait_dir()
-                prev_folder = cur_folder
-
-                if download_material(f, log, base_dir):
-                    dl += 1
-                else:
-                    err += 1
+            dl = sk = err = 0
+            folders = list(by_folder.items())
+            for fi, ((folder_id, folder_path), folder_files) in enumerate(folders):
+                n_dl, n_sk, n_err = _download_folder_zip(
+                    folder_id, folder_path, course.id,
+                    folder_files, log, base_dir,
+                )
+                dl += n_dl; sk += n_sk; err += n_err
                 _save_json(log_path, log)
 
-            print(f"\n  Done: {dl} downloaded, {sk} skipped, {err} errors")
-            total_dl += dl; total_sk += sk; total_err += err
+                # Only wait if this folder actually downloaded something
+                if args.secretly and n_dl > 0 and fi < len(folders) - 1:
+                    _secretly_wait_dir()
 
-            # Secretly: wait between courses
-            if args.secretly and ci < len(courses) - 1:
+            print(f"\n  Done: {dl} downloaded, {sk} skipped, {err} errors "
+                  f"across {len(by_folder)} folder(s)")
+            total_dl += dl; total_sk += sk
+
+            # Only wait between courses if this course actually downloaded something
+            if args.secretly and dl > 0 and ci < len(courses) - 1:
                 _secretly_wait_dir()
 
         print(f"\n{'='*70}")
-        print(f"All done: {total_dl} downloaded, {total_sk} skipped, "
-              f"{total_err} errors across {len(courses)} course(s)")
+        print(f"All done: {total_dl} downloaded, {total_sk} skipped "
+              f"across {len(courses)} course(s)")
 
 
 if __name__ == "__main__":
