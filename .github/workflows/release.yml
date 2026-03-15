@@ -66,9 +66,16 @@ jobs:
             libglib2.0-dev \
             fuse libfuse2
 
-      # ── Generate app icons ───────────────────────────────────────────────────
-      - name: Generate icons
+      # ── Generate app icons (Linux / macOS) ───────────────────────────────────
+      - name: Generate icons (Linux / macOS)
+        if: matrix.platform != 'windows'
         run: python make_icon.py
+
+      # ── Generate app icons (Windows) ─────────────────────────────────────────
+      - name: Generate icons (Windows)
+        if: matrix.platform == 'windows'
+        run: python make_icon.py
+        shell: pwsh
 
       # ── Build with PyInstaller ───────────────────────────────────────────────
       - name: Build (Linux / macOS)
