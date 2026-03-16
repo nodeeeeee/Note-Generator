@@ -48,9 +48,64 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 _DEFAULT_PYTHON = PYTHON   # auto-detected fallback; may be overridden by user config
 
+ML_VENV_DIR    = DATA_DIR / "venv"
+ML_VENV_PYTHON = str(ML_VENV_DIR / (
+    "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+))
+
+# ML packages needed by the pipeline scripts (GUI requirements are bundled separately)
+_ML_PACKAGES = [
+    "tqdm",
+    "faster-whisper",
+    "sentence-transformers",
+    "faiss-cpu",
+    "pymupdf",
+    "python-pptx",
+    "python-docx",
+    "openai",
+    "anthropic",
+    "google-generativeai",
+    "requests",
+    "pillow",
+    "httpx",
+    "playwright",
+    "canvasapi",
+]
+
+
+def _detect_cuda() -> tuple[int, int] | None:
+    """Return (major, minor) CUDA version from nvidia-smi, or None if no GPU."""
+    try:
+        r = subprocess.run(
+            ["nvidia-smi"], capture_output=True, text=True, timeout=10
+        )
+        if r.returncode == 0:
+            m = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", r.stdout)
+            if m:
+                return (int(m.group(1)), int(m.group(2)))
+            return (12, 0)   # nvidia-smi works but version unreadable → assume 12.x
+    except Exception:
+        pass
+    return None
+
+
+def _torch_index_url(cuda: tuple[int, int] | None) -> str | None:
+    """Return the PyTorch extra-index-url for the detected CUDA version."""
+    if cuda is None:
+        return None          # CPU build from PyPI
+    major, minor = cuda
+    version = major * 10 + minor   # 12.8 → 128
+    if version >= 128:
+        return "https://download.pytorch.org/whl/cu128"
+    if version >= 126:
+        return "https://download.pytorch.org/whl/cu126"
+    if version >= 124:
+        return "https://download.pytorch.org/whl/cu124"
+    return "https://download.pytorch.org/whl/cu121"
+
 
 def _load_python_from_config() -> None:
-    """Override PYTHON global with the user-configured interpreter path."""
+    """Override PYTHON global with the user-configured path or the managed venv."""
     global PYTHON
     config_file = DATA_DIR / "config.json"
     if config_file.exists():
@@ -59,8 +114,12 @@ def _load_python_from_config() -> None:
             p = cfg.get("PYTHON_PATH", "").strip()
             if p:
                 PYTHON = p
+                return
         except Exception:
             pass
+    # Auto-use managed venv if it exists and no explicit path is configured
+    if Path(ML_VENV_PYTHON).exists():
+        PYTHON = ML_VENV_PYTHON
 
 
 COURSES: dict[int, str] = {}   # populated from Canvas API after token is entered
@@ -1217,6 +1276,164 @@ def build_settings(page: ft.Page,
         ], spacing=8),
     ], spacing=10))
 
+    # ── ML Environment ────────────────────────────────────────────────────────
+
+    _venv_exists = Path(ML_VENV_PYTHON).exists()
+    env_status = ft.Text(
+        ("✓ Installed at " + str(ML_VENV_DIR)) if _venv_exists else "Not installed",
+        size=11,
+        color=C_SUCCESS if _venv_exists else ft.Colors.with_opacity(0.5, ft.Colors.WHITE),
+    )
+    env_log = ft.TextField(
+        value="", multiline=True, read_only=True, min_lines=1, max_lines=12,
+        text_size=11, bgcolor=C_OUTPUT_BG, border_color=ft.Colors.TRANSPARENT,
+        color=ft.Colors.with_opacity(0.85, ft.Colors.WHITE),
+        expand=True, visible=False,
+    )
+    env_setup_btn = ft.FilledButton(
+        "Install ML Environment",
+        icon=ft.Icons.DOWNLOAD_OUTLINED,
+        style=ft.ButtonStyle(bgcolor=C_SECONDARY, color=ft.Colors.BLACK),
+    )
+    env_reinstall_btn = ft.OutlinedButton(
+        "Reinstall",
+        icon=ft.Icons.REFRESH,
+        style=ft.ButtonStyle(side=ft.BorderSide(1, C_SECONDARY), color=C_SECONDARY),
+        visible=_venv_exists,
+    )
+
+    def _append_log(line: str) -> None:
+        env_log.value = (env_log.value or "") + line + "\n"
+        env_log.visible = True
+        page.update()
+
+    def _run_env_setup(_=None) -> None:
+        global PYTHON
+        env_setup_btn.disabled = True
+        env_reinstall_btn.disabled = True
+        env_log.value = ""
+        env_log.visible = True
+        env_status.value = "Setting up…"
+        env_status.color = C_WARN
+        page.update()
+
+        def _worker():
+            global PYTHON
+            base_py = _DEFAULT_PYTHON
+            if not Path(base_py).exists():
+                import shutil as _sh
+                base_py = _sh.which("python3") or _sh.which("python") or ""
+            if not base_py:
+                _append_log("ERROR: No system Python 3 found. Install Python 3 first.")
+                env_status.value = "✗ Setup failed — Python 3 not found"
+                env_status.color = C_ERROR
+                env_setup_btn.disabled = False
+                env_reinstall_btn.disabled = False
+                page.update()
+                return
+
+            # Step 1 — create venv
+            _append_log(f"► Creating venv at {ML_VENV_DIR} …")
+            r = subprocess.run(
+                [base_py, "-m", "venv", str(ML_VENV_DIR)],
+                capture_output=True, text=True,
+            )
+            if r.returncode != 0:
+                _append_log("STDERR: " + r.stderr.strip())
+                _append_log("ERROR: venv creation failed.")
+                env_status.value = "✗ Setup failed"
+                env_status.color = C_ERROR
+                env_setup_btn.disabled = False
+                env_reinstall_btn.disabled = False
+                page.update()
+                return
+            _append_log("  venv created.")
+
+            pip = str(ML_VENV_DIR / (
+                "Scripts/pip.exe" if sys.platform == "win32" else "bin/pip"
+            ))
+
+            # Step 2 — upgrade pip
+            _append_log("► Upgrading pip …")
+            subprocess.run([pip, "install", "--upgrade", "pip"],
+                           capture_output=True, text=True)
+
+            # Step 3 — detect CUDA and install torch
+            cuda = _detect_cuda()
+            idx  = _torch_index_url(cuda)
+            if cuda:
+                _append_log(f"► CUDA {cuda[0]}.{cuda[1]} detected — installing torch (GPU) …")
+            else:
+                _append_log("► No GPU detected — installing torch (CPU) …")
+            torch_cmd = [pip, "install", "torch"]
+            if idx:
+                torch_cmd += ["--index-url", idx]
+            proc = subprocess.Popen(
+                torch_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            for line in proc.stdout:
+                _append_log(line.rstrip())
+            proc.wait()
+
+            # Step 4 — install remaining ML packages
+            _append_log("► Installing ML packages …")
+            proc = subprocess.Popen(
+                [pip, "install"] + _ML_PACKAGES,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            for line in proc.stdout:
+                _append_log(line.rstrip())
+            proc.wait()
+
+            # Step 5 — playwright browsers
+            _append_log("► Installing Playwright browsers …")
+            venv_py = ML_VENV_PYTHON
+            proc = subprocess.Popen(
+                [venv_py, "-m", "playwright", "install", "chromium"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            for line in proc.stdout:
+                _append_log(line.rstrip())
+            proc.wait()
+
+            # Done — activate venv python
+            PYTHON = ML_VENV_PYTHON
+            try:
+                _save_config_all({"PYTHON_PATH": ""})   # clear manual override; venv is auto-detected
+            except Exception:
+                pass
+            env_status.value = "✓ Installed at " + str(ML_VENV_DIR)
+            env_status.color = C_SUCCESS
+            env_setup_btn.disabled = False
+            env_reinstall_btn.disabled = False
+            env_reinstall_btn.visible = True
+            _append_log("\n✓ ML environment ready. You can now run the pipeline.")
+            page.update()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    env_setup_btn.on_click = _run_env_setup
+    env_reinstall_btn.on_click = _run_env_setup
+
+    env_card = _card(ft.Column(controls=[
+        ft.Text("ML Environment", size=13,
+                weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+        ft.Text(
+            "Creates a virtual environment at ~/.auto_note/venv/ and installs all "
+            "pipeline dependencies (torch, faster-whisper, sentence-transformers, …) "
+            "automatically. Only needed once.",
+            size=11, color=ft.Colors.with_opacity(0.5, ft.Colors.WHITE),
+        ),
+        ft.Container(height=4),
+        ft.Row(controls=[
+            ft.Text("Status:", size=11,
+                    color=ft.Colors.with_opacity(0.5, ft.Colors.WHITE), width=60),
+            env_status,
+        ], spacing=8),
+        ft.Row(controls=[env_setup_btn, env_reinstall_btn], spacing=10),
+        env_log,
+    ], spacing=10))
+
     # ── Tunable Constants ─────────────────────────────────────────────────────
 
     _SCRIPT_COLORS = {
@@ -1429,6 +1646,7 @@ def build_settings(page: ft.Page,
                 _section_title("Settings", ft.Icons.SETTINGS_OUTLINED),
                 conn_card,
                 keys_card,
+                env_card,
                 const_card,
                 ft.Container(height=8),
                 ft.Row(controls=[
