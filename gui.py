@@ -73,6 +73,8 @@ def _load_courses_from_canvas() -> str:
             params={"enrollment_state": "active", "per_page": 100},
             timeout=10,
         )
+        if resp.status_code == 401:
+            return "401 Unauthorized — Canvas token is invalid or expired. Generate a new one in Canvas → Account → Settings → New Access Token."
         resp.raise_for_status()
         for c in resp.json():
             name = c.get("name") or c.get("course_code") or ""
@@ -1144,6 +1146,17 @@ def build_settings(page: ft.Page,
         refresh_status.value = "Refreshing…"
         refresh_status.color = ft.Colors.with_opacity(0.6, ft.Colors.WHITE)
         page.update()
+        # Flush current credentials to disk before loading, so the user doesn't
+        # need to click "Save All" first — whatever is typed right now is used.
+        try:
+            _save_config_all({
+                "CANVAS_URL":   _v["canvas_url"].strip(),
+                "PANOPTO_HOST": _v["panopto"].strip(),
+            })
+            if _v["canvas"].strip():
+                canvas_file.write_text(_v["canvas"].strip())
+        except Exception:
+            pass
         err = _load_courses_from_canvas()
         n = len(COURSES)
         if n:
