@@ -1070,59 +1070,52 @@ def build_settings(page: ft.Page,
         with open(config_file, "w") as f:
             json.dump(cfg, f, indent=2)
 
+    # _v holds the live text for every field; on_change keeps it in sync.
+    # Reading tf.value without on_change returns the *initial* value only.
     _cfg = _load_config()
-    tf_canvas_url = ft.TextField(
-        value=_cfg.get("CANVAS_URL", ""),
-        hint_text="canvas.yourschool.edu  (https:// added automatically)", expand=True, dense=True,
-        bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12,
-    )
-    tf_panopto = ft.TextField(
-        value=_cfg.get("PANOPTO_HOST", ""),
-        hint_text="mediaweb.ap.panopto.com", expand=True, dense=True,
-        bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12,
-    )
-
-    conn_card = _card(ft.Column(controls=[
-        ft.Text("Connection", size=13,
-                weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
-        ft.Text("Saved to config.json in the project directory.",
-                size=11, color=ft.Colors.with_opacity(0.5, ft.Colors.WHITE)),
-        ft.Container(height=4),
-        _field_row("Canvas URL",   tf_canvas_url),
-        _field_row("Panopto Host", tf_panopto),
-    ], spacing=10))
-
-    # ── API Keys ──────────────────────────────────────────────────────────────
-
     canvas_file    = PROJECT_DIR / "canvas_token.txt"
     openai_file    = PROJECT_DIR / "openai_api.txt"
     anthropic_file = PROJECT_DIR / "anthropic_key.txt"
     gemini_file    = PROJECT_DIR / "gemini_api.txt"
 
-    tf_canvas    = ft.TextField(
-        value=canvas_file.read_text().strip() if canvas_file.exists() else "",
+    _v = {
+        "canvas_url":  _cfg.get("CANVAS_URL", ""),
+        "panopto":     _cfg.get("PANOPTO_HOST", ""),
+        "canvas":      canvas_file.read_text().strip() if canvas_file.exists() else "",
+        "openai":      openai_file.read_text().strip() if openai_file.exists() else "",
+        "anthropic":   anthropic_file.read_text().strip() if anthropic_file.exists() else "",
+        "gemini":      gemini_file.read_text().strip() if gemini_file.exists() else "",
+    }
+
+    def _mk_tf(key: str, **kwargs) -> ft.TextField:
+        return ft.TextField(
+            value=_v[key],
+            on_change=lambda e, k=key: _v.update({k: e.control.value}),
+            **kwargs,
+        )
+
+    tf_canvas_url = _mk_tf("canvas_url",
+        hint_text="canvas.yourschool.edu  (https:// added automatically)",
+        expand=True, dense=True, bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12)
+    tf_panopto = _mk_tf("panopto",
+        hint_text="mediaweb.ap.panopto.com",
+        expand=True, dense=True, bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12)
+    tf_canvas = _mk_tf("canvas",
         password=True, can_reveal_password=True,
-        hint_text="Canvas API token", expand=True, dense=True,
-        bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12,
-    )
-    tf_openai    = ft.TextField(
-        value=openai_file.read_text().strip() if openai_file.exists() else "",
+        hint_text="Canvas API token",
+        expand=True, dense=True, bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12)
+    tf_openai = _mk_tf("openai",
         password=True, can_reveal_password=True,
-        hint_text="sk-…  (no default)", expand=True, dense=True,
-        bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12,
-    )
-    tf_anthropic = ft.TextField(
-        value=anthropic_file.read_text().strip() if anthropic_file.exists() else "",
+        hint_text="sk-…  (no default)",
+        expand=True, dense=True, bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12)
+    tf_anthropic = _mk_tf("anthropic",
         password=True, can_reveal_password=True,
-        hint_text="sk-ant-…  (no default)", expand=True, dense=True,
-        bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12,
-    )
-    tf_gemini    = ft.TextField(
-        value=gemini_file.read_text().strip() if gemini_file.exists() else "",
+        hint_text="sk-ant-…  (no default)",
+        expand=True, dense=True, bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12)
+    tf_gemini = _mk_tf("gemini",
         password=True, can_reveal_password=True,
-        hint_text="AIza…  (Google AI Studio key, no default)", expand=True, dense=True,
-        bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12,
-    )
+        hint_text="AIza…  (Google AI Studio key, no default)",
+        expand=True, dense=True, bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12)
 
     refresh_status = ft.Text("", size=11,
                              color=ft.Colors.with_opacity(0.6, ft.Colors.WHITE))
@@ -1270,6 +1263,7 @@ def build_settings(page: ft.Page,
                 value=cur, expand=True, dense=True,
                 bgcolor=C_OUTPUT_BG, border_color=accent,
                 text_size=12, content_padding=ft.padding.symmetric(horizontal=8, vertical=6),
+                on_change=lambda e: None,  # ensures Flet syncs typed value to ctrl.value
             )
 
         _const_ctrls.append((ctrl, script, name, default))
@@ -1318,23 +1312,25 @@ def build_settings(page: ft.Page,
         errors: list[str] = []
         try:
             _save_config_all({
-                "CANVAS_URL":   tf_canvas_url.value.strip(),
-                "PANOPTO_HOST": tf_panopto.value.strip(),
+                "CANVAS_URL":   _v["canvas_url"].strip(),
+                "PANOPTO_HOST": _v["panopto"].strip(),
             })
         except Exception as e:
             errors.append(f"Connection: {e}")
-        for path, tf in [
-            (canvas_file,    tf_canvas),
-            (openai_file,    tf_openai),
-            (anthropic_file, tf_anthropic),
-            (gemini_file,    tf_gemini),
+        for path, key in [
+            (canvas_file,    "canvas"),
+            (openai_file,    "openai"),
+            (anthropic_file, "anthropic"),
+            (gemini_file,    "gemini"),
         ]:
             try:
-                if tf.value.strip():
-                    path.write_text(tf.value.strip())
+                val = _v[key].strip()
+                if val:
+                    path.write_text(val)
             except Exception as e:
                 errors.append(str(e))
         for ctrl, script, name, default in _const_ctrls:
+            # Dropdowns sync via on_select; TextFields sync via on_change
             val = (ctrl.value or default) if isinstance(ctrl, ft.Dropdown) \
                   else ctrl.value.strip()
             if not _write_constant(script, name, val):
