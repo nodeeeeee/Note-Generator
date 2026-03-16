@@ -1077,8 +1077,6 @@ def build_settings(page: ft.Page,
         try:
             _save_config("CANVAS_URL", tf_canvas_url.value.strip())
             _snack("Canvas URL saved.")
-            if on_courses_changed:
-                on_courses_changed()
         except Exception as e:
             _snack(f"Error: {e}", ok=False)
 
@@ -1159,7 +1157,6 @@ def build_settings(page: ft.Page,
         try:
             canvas_file.write_text(tf_canvas.value.strip())
             _snack("Canvas token saved.")
-            _do_refresh()
         except Exception as e:
             _snack(f"Error: {e}", ok=False)
 
