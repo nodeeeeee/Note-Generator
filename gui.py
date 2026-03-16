@@ -1117,6 +1117,16 @@ def build_settings(page: ft.Page,
         hint_text="AIza…  (Google AI Studio key, no default)",
         expand=True, dense=True, bgcolor=C_OUTPUT_BG, border_color=C_PRIMARY, text_size=12)
 
+    conn_card = _card(ft.Column(controls=[
+        ft.Text("Connection", size=13,
+                weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+        ft.Text("Saved to config.json in the project directory.",
+                size=11, color=ft.Colors.with_opacity(0.5, ft.Colors.WHITE)),
+        ft.Container(height=4),
+        _field_row("Canvas URL",   tf_canvas_url),
+        _field_row("Panopto Host", tf_panopto),
+    ], spacing=10))
+
     refresh_status = ft.Text("", size=11,
                              color=ft.Colors.with_opacity(0.6, ft.Colors.WHITE))
 
