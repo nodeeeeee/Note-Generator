@@ -492,7 +492,8 @@ def _page_layout(scroll_controls: list[ft.Control]) -> ft.Column:
 # ── Page: Dashboard ───────────────────────────────────────────────────────────
 
 def build_dashboard(page: ft.Page, console: OutputConsole,
-                    navigate: callable | None = None) -> ft.Column:
+                    navigate: callable | None = None,
+                    on_refresh: callable | None = None) -> ft.Column:
 
     def _course_card(cid: int, name: str) -> ft.Card:
         vd, vt  = _video_status(cid)
@@ -579,8 +580,19 @@ def build_dashboard(page: ft.Page, console: OutputConsole,
             ft.Container(height=8),
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10))]
 
+    refresh_btn = ft.IconButton(
+        icon=ft.Icons.REFRESH,
+        tooltip="Refresh courses from Canvas",
+        icon_color=C_PRIMARY,
+        on_click=lambda _: on_refresh() if on_refresh else None,
+    )
+
     scroll_content = [
-        _section_title("Course Overview", ft.Icons.DASHBOARD_OUTLINED),
+        ft.Row(controls=[
+            _section_title("Course Overview", ft.Icons.DASHBOARD_OUTLINED),
+            ft.Container(expand=True),
+            refresh_btn,
+        ]),
         *course_rows,
         ft.Container(height=4),
         _section_title("Quick Actions", ft.Icons.BOLT_OUTLINED),
@@ -1031,13 +1043,11 @@ def build_settings(page: ft.Page,
                    on_courses_changed: callable | None = None) -> ft.Column:
 
     def _snack(msg: str, ok: bool = True) -> None:
-        page.snack_bar = ft.SnackBar(
+        page.open(ft.SnackBar(
             ft.Text(msg, color=ft.Colors.BLACK),
             bgcolor=C_SUCCESS if ok else C_ERROR,
-            duration=2000,
-        )
-        page.snack_bar.open = True
-        page.update()
+            duration=2500,
+        ))
 
     def _key_row(label: str, tf: ft.TextField, on_save) -> ft.Row:
         return ft.Row(controls=[
@@ -1076,14 +1086,14 @@ def build_settings(page: ft.Page,
     def _save_canvas_url(_):
         try:
             _save_config("CANVAS_URL", tf_canvas_url.value.strip())
-            _snack("Canvas URL saved.")
+            _snack("Canvas URL saved successfully!")
         except Exception as e:
             _snack(f"Error: {e}", ok=False)
 
     def _save_panopto(_):
         try:
             _save_config("PANOPTO_HOST", tf_panopto.value.strip())
-            _snack("Panopto host saved.")
+            _snack("Panopto host saved successfully!")
         except Exception as e:
             _snack(f"Error: {e}", ok=False)
 
@@ -1156,28 +1166,28 @@ def build_settings(page: ft.Page,
     def _save_canvas(_):
         try:
             canvas_file.write_text(tf_canvas.value.strip())
-            _snack("Canvas token saved.")
+            _snack("Canvas token saved successfully!")
         except Exception as e:
             _snack(f"Error: {e}", ok=False)
 
     def _save_openai(_):
         try:
             openai_file.write_text(tf_openai.value.strip())
-            _snack("OpenAI key saved to openai_api.txt.")
+            _snack("OpenAI key saved successfully!")
         except Exception as e:
             _snack(f"Error: {e}", ok=False)
 
     def _save_anthropic(_):
         try:
             anthropic_file.write_text(tf_anthropic.value.strip())
-            _snack("Anthropic key saved to anthropic_key.txt.")
+            _snack("Anthropic key saved successfully!")
         except Exception as e:
             _snack(f"Error: {e}", ok=False)
 
     def _save_gemini(_):
         try:
             gemini_file.write_text(tf_gemini.value.strip())
-            _snack("Gemini key saved to gemini_api.txt.")
+            _snack("Gemini key saved successfully!")
         except Exception as e:
             _snack(f"Error: {e}", ok=False)
 
@@ -1414,7 +1424,8 @@ def main(page: ft.Page) -> None:
 
     def _build_pages() -> list:
         return [
-            build_dashboard(page, console, navigate=navigate),
+            build_dashboard(page, console, navigate=navigate,
+                            on_refresh=lambda: _rebuild_ref[0] and _rebuild_ref[0]()),
             build_pipeline(page, console),
             build_download(page, console),
             build_transcribe(page, console),
