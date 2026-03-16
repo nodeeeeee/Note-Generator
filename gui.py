@@ -23,7 +23,11 @@ import flet as ft
 # ── Project layout ────────────────────────────────────────────────────────────
 
 PROJECT_DIR = Path(__file__).parent
-PYTHON      = sys.executable
+if getattr(sys, "frozen", False):
+    import shutil as _shutil
+    PYTHON = _shutil.which("python3") or _shutil.which("python") or "python3"
+else:
+    PYTHON = sys.executable
 
 SCRIPTS = {
     "downloader": PROJECT_DIR / "downloader.py",
@@ -207,7 +211,7 @@ class OutputConsole:
             expand=True,
             spacing=0,
             auto_scroll=True,
-            padding=ft.padding.symmetric(horizontal=8, vertical=6),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=6),
         )
 
         self._badge = ft.Text("", size=11, color=C_PRIMARY)
@@ -243,7 +247,7 @@ class OutputConsole:
                             self._clear_btn,
                         ],
                     ),
-                    padding=ft.padding.only(top=8, bottom=4),
+                    padding=ft.Padding.only(top=8, bottom=4),
                 ),
                 # Scrollable text area — fixed height so form area gets the rest
                 ft.Container(
@@ -412,7 +416,7 @@ def _chip(label: str, color: str) -> ft.Container:
         content=ft.Text(label, size=10, color=color, weight=ft.FontWeight.BOLD),
         bgcolor=ft.Colors.with_opacity(0.12, color),
         border_radius=12,
-        padding=ft.padding.symmetric(horizontal=8, vertical=3),
+        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
     )
 
 def _status_chip(done: int, total: int) -> ft.Container:
@@ -473,7 +477,7 @@ def _run_btn(text: str, icon: str, on_click: callable) -> ft.FilledButton:
         style=ft.ButtonStyle(
             bgcolor=C_PRIMARY,
             color=ft.Colors.BLACK,
-            padding=ft.padding.symmetric(horizontal=16, vertical=10),
+            padding=ft.Padding.symmetric(horizontal=16, vertical=10),
         ),
         on_click=on_click,
     )
@@ -487,7 +491,7 @@ def _outlined_btn(text: str, icon: str, on_click: callable) -> ft.OutlinedButton
         ),
         style=ft.ButtonStyle(
             side=ft.BorderSide(1, C_PRIMARY),
-            padding=ft.padding.symmetric(horizontal=14, vertical=10),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
         ),
         on_click=on_click,
     )
@@ -563,7 +567,7 @@ def build_dashboard(page: ft.Page, console: OutputConsole,
                 bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.WHITE),
                 color=ft.Colors.WHITE,
                 side=ft.BorderSide(1, ft.Colors.with_opacity(0.12, ft.Colors.WHITE)),
-                padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                padding=ft.Padding.symmetric(horizontal=12, vertical=8),
             ),
             on_click=_go,
         )
@@ -1289,13 +1293,13 @@ def build_settings(page: ft.Page,
                 options=[ft.dropdown.Option(key=val, text=label) for label, val in options],
                 expand=True, dense=True,
                 bgcolor=C_OUTPUT_BG, border_color=accent, text_size=12,
-                content_padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
             )
         else:
             ctrl = ft.TextField(
                 value=cur, expand=True, dense=True,
                 bgcolor=C_OUTPUT_BG, border_color=accent,
-                text_size=12, content_padding=ft.padding.symmetric(horizontal=8, vertical=6),
+                text_size=12, content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
                 on_change=lambda e: None,  # ensures Flet syncs typed value to ctrl.value
             )
 
@@ -1312,7 +1316,7 @@ def build_settings(page: ft.Page,
         return ft.Row(controls=[
             ft.Container(
                 ft.Text(script, size=10, color=accent, weight=ft.FontWeight.BOLD),
-                width=74, padding=ft.padding.symmetric(horizontal=4, vertical=2),
+                width=74, padding=ft.Padding.symmetric(horizontal=4, vertical=2),
                 border_radius=4,
                 bgcolor=ft.Colors.with_opacity(0.12, accent),
             ),
@@ -1379,7 +1383,7 @@ def build_settings(page: ft.Page,
         on_click=_save_all,
         style=ft.ButtonStyle(
             bgcolor=C_PRIMARY, color=ft.Colors.BLACK,
-            padding=ft.padding.symmetric(horizontal=28, vertical=14),
+            padding=ft.Padding.symmetric(horizontal=28, vertical=14),
         ),
     )
     refresh_btn_settings = ft.OutlinedButton(
@@ -1388,7 +1392,7 @@ def build_settings(page: ft.Page,
         on_click=lambda _: _do_refresh(),
         style=ft.ButtonStyle(
             side=ft.BorderSide(1, C_SECONDARY), color=C_SECONDARY,
-            padding=ft.padding.symmetric(horizontal=20, vertical=14),
+            padding=ft.Padding.symmetric(horizontal=20, vertical=14),
         ),
     )
 
@@ -1458,7 +1462,7 @@ def main(page: ft.Page) -> None:
     page_content = ft.Container(
         content=pages[0],
         expand=True,
-        padding=ft.padding.only(left=16, right=16, top=16, bottom=8),
+        padding=ft.Padding.only(left=16, right=16, top=16, bottom=8),
     )
 
     # Right-side panel: scrollable page content + pinned console
@@ -1467,7 +1471,7 @@ def main(page: ft.Page) -> None:
             page_content,
             ft.Container(
                 content=console.container,
-                padding=ft.padding.only(left=16, right=16, bottom=12),
+                padding=ft.Padding.only(left=16, right=16, bottom=12),
             ),
         ],
         spacing=0,
@@ -1543,7 +1547,7 @@ def main(page: ft.Page) -> None:
                         weight=ft.FontWeight.BOLD,
                         text_align=ft.TextAlign.CENTER),
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
-            padding=ft.padding.only(bottom=12),
+            padding=ft.Padding.only(bottom=12),
         ),
     )
 
