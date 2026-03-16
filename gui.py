@@ -1319,20 +1319,56 @@ def build_settings(page: ft.Page,
 
         def _worker():
             global PYTHON
-            base_py = _DEFAULT_PYTHON
-            if not Path(base_py).exists():
-                import shutil as _sh
-                base_py = _sh.which("python3") or _sh.which("python") or ""
+
+            # ── Find a Python that has SSL (required for pip HTTPS) ──────────
+            import shutil as _sh
+            home = Path.home()
+            _candidates = [
+                # conda/mamba installs (have SSL bundled)
+                str(home / "miniconda3/bin/python3"),
+                str(home / "miniconda3/bin/python"),
+                str(home / "anaconda3/bin/python3"),
+                str(home / "anaconda3/bin/python"),
+                str(home / "miniforge3/bin/python3"),
+                str(home / "miniforge3/bin/python"),
+                str(home / "mambaforge/bin/python3"),
+                str(home / "mambaforge/bin/python"),
+                str(home / ".local/share/mamba/bin/python3"),
+                # PATH lookup
+                _sh.which("python3") or "",
+                _sh.which("python") or "",
+                "/usr/bin/python3",
+                "/usr/local/bin/python3",
+            ]
+
+            base_py = ""
+            for cand in _candidates:
+                if not cand or not Path(cand).exists():
+                    continue
+                r = subprocess.run(
+                    [cand, "-c", "import ssl, venv"],
+                    capture_output=True, timeout=5,
+                )
+                if r.returncode == 0:
+                    base_py = cand
+                    _append_log(f"► Using Python: {base_py}")
+                    break
+
             if not base_py:
-                _append_log("ERROR: No system Python 3 found. Install Python 3 first.")
-                env_status.value = "✗ Setup failed — Python 3 not found"
+                _append_log("ERROR: No Python 3 with SSL support found.")
+                _append_log("  Install Miniconda or ensure python3 is built with SSL.")
+                env_status.value = "✗ Setup failed — Python with SSL not found"
                 env_status.color = C_ERROR
                 env_setup_btn.disabled = False
                 env_reinstall_btn.disabled = False
                 page.update()
                 return
 
-            # Step 1 — create venv
+            # Step 1 — create venv (remove stale one first)
+            import shutil as _sh2
+            if ML_VENV_DIR.exists():
+                _append_log(f"► Removing old venv …")
+                _sh2.rmtree(str(ML_VENV_DIR))
             _append_log(f"► Creating venv at {ML_VENV_DIR} …")
             r = subprocess.run(
                 [base_py, "-m", "venv", str(ML_VENV_DIR)],
