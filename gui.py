@@ -29,13 +29,6 @@ if getattr(sys, "frozen", False):
 else:
     PYTHON = sys.executable
 
-SCRIPTS = {
-    "downloader": PROJECT_DIR / "downloader.py",
-    "transcribe": PROJECT_DIR / "extract_caption.py",
-    "align":      PROJECT_DIR / "semantic_alignment.py",
-    "generate":   PROJECT_DIR / "note_generation.py",
-}
-
 # User data directory: persistent across app restarts.
 # When running as a PyInstaller bundle (AppImage / .exe), __file__ resolves to
 # a temporary extraction folder that is deleted on exit — any files written
@@ -45,6 +38,34 @@ if getattr(sys, "frozen", False):
 else:
     DATA_DIR = PROJECT_DIR
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Pipeline scripts are installed to ~/.auto_note/scripts/ so they run from a
+# persistent location instead of the temporary AppImage mount under /tmp.
+SCRIPTS_DIR = DATA_DIR / "scripts"
+
+
+def _install_scripts() -> None:
+    """Copy bundled pipeline scripts from AppImage to ~/.auto_note/scripts/."""
+    if not getattr(sys, "frozen", False):
+        return   # dev mode: use files in place
+    import shutil as _sh
+    SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    for fname in [
+        "downloader.py", "extract_caption.py",
+        "semantic_alignment.py", "note_generation.py",
+    ]:
+        src = PROJECT_DIR / fname
+        dst = SCRIPTS_DIR / fname
+        if src.exists():
+            _sh.copy2(str(src), str(dst))
+
+
+SCRIPTS = {
+    "downloader": SCRIPTS_DIR / "downloader.py",
+    "transcribe": SCRIPTS_DIR / "extract_caption.py",
+    "align":      SCRIPTS_DIR / "semantic_alignment.py",
+    "generate":   SCRIPTS_DIR / "note_generation.py",
+}
 
 _DEFAULT_PYTHON = PYTHON   # auto-detected fallback; may be overridden by user config
 
@@ -1780,6 +1801,7 @@ def _show_installer(page: ft.Page) -> None:
     def _on_install_complete() -> None:
         """Called by the installer after the venv is ready; launches main UI."""
         page.controls.clear()
+        _install_scripts()
         _load_python_from_config()
         _load_output_dir_from_config()
         _load_courses_from_canvas()
@@ -2149,6 +2171,9 @@ def main(page: ft.Page) -> None:
     page.window.min_width  = 720
     page.window.min_height = 520
     page.padding = 0
+
+    # Install pipeline scripts to ~/.auto_note/scripts/ (no-op in dev mode)
+    _install_scripts()
 
     # Load user-configured settings from config
     _load_python_from_config()
