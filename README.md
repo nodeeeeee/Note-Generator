@@ -1,297 +1,322 @@
-# auto_note
+# AutoNote
 
-Automated lecture note generator for NUS Canvas courses.
-Downloads lecture videos and slides, transcribes audio, aligns transcripts to slides, and produces comprehensive Markdown study notes using GPT.
-
----
-
-## Overview
-
-```
-Canvas LMS
-   │
-   ├─ downloader.py            Unified downloader (videos + materials)
-   │     ├─ [course_id]/videos/      .mp4 files
-   │     └─ [course_id]/materials/   PDFs, PPTXs, etc.
-   │
-   ▼
-   extract_caption.py          Transcribe video → timestamped JSON
-         │
-         ▼
-   semantic_alignment.py       Align transcript segments → slide pages
-         │
-         ▼
-   note_generation.py          Generate Markdown study notes (GPT)
-         │
-         ▼
-   [course_id]/notes/
-         ├─ CourseName_notes.md
-         └─ sections/          Per-chunk cached section files
-```
+AutoNote is a desktop application that automatically generates comprehensive study notes from Canvas LMS lecture materials and videos. It downloads slides and videos, transcribes audio, aligns the transcript to slide pages, and produces a single Markdown note file per course using an LLM.
 
 ---
 
-## Setup
+## Quick start
 
-### Conda environment
-
-```bash
-conda activate auto-note
-```
-
-### API keys
-
-| Key | Location | Source |
-|-----|----------|------|
-| Canvas token | `canvas_token.txt` or `CANVAS_TOKEN` constant in `downloader.py` | Canvas->settings |
-| OpenAI key | `openai_api.txt` or `OPENAI_API_KEY` env var | OpenAI API platform |
-
-### Course IDs
-
-Known NUS courses:
-
-| ID | Course |
-|----|--------|
-| 85367 | CS2101 |
-| 85377 | CS2103 |
-| 85397 | CS2105 |
-| 85427 | CS3210 |
+1. **Launch** the AutoNote AppImage (or run `python gui.py`)
+2. **Settings** → enter Canvas URL and Canvas token → **Save All** → **Refresh Courses**
+3. **Settings** → enter at least one LLM API key (OpenAI / Anthropic / Gemini) → **Save All**
+4. **Settings → ML Environment** → click **Install ML Environment** (first time only, takes ~10 min)
+5. **Pipeline** → select course → click **Run Pipeline**
 
 ---
 
-## Pipeline — Step by Step
+## Interface overview
 
-### 1. Download videos and materials — `downloader.py`
+The app has six pages, accessible from the left navigation rail:
 
-Unified Canvas downloader combining video (Panopto) and material (Files API) downloads into a single CLI.
+| Page | Purpose |
+|------|---------|
+| **Dashboard** | Course overview: video / caption / alignment counts per course; quick-action shortcuts |
+| **Pipeline** | One-click full pipeline wizard: runs all five steps in sequence |
+| **Download** | Fine-grained control over video and material downloads |
+| **Transcribe** | Transcribe downloaded videos to timestamped captions |
+| **Align** | Map caption segments to specific slide pages |
+| **Generate Notes** | Generate the final Markdown study notes |
+| **Settings** | API keys, ML environment, model selection, tunable constants |
 
-#### Course discovery
-
-```bash
-python downloader.py --course-list          # list all academic courses with IDs
-```
-
-#### Video operations
-
-```bash
-python downloader.py --video-list                       # list all available videos (global numbers)
-python downloader.py --video-list --course 85427        # list videos for one course (course-local numbers)
-
-python downloader.py --download-video 1 3 5             # download by global number
-python downloader.py --download-video 2 4 --course 85427  # download by course-local number
-python downloader.py --download-video-all               # download all pending videos
-python downloader.py --download-video-all --course 85427  # all pending for one course
-```
-
-**Output:** `[course_id]/videos/[title].mp4`
-
-A `manifest.json` in the project root tracks downloaded videos and prevents re-downloads.
-
-#### Material operations
-
-```bash
-python downloader.py --material-list                    # list all downloadable files
-python downloader.py --material-list --course 85427     # files for one course
-
-python downloader.py --download-material "L02"          # download by partial filename match
-python downloader.py --download-material-all            # download all pending materials
-python downloader.py --download-material-all --course 85427
-```
-
-**Smart size filter:** If a course's total files exceed 1 GB, GPT identifies only lecture notes and tutorials for download, skipping large multimedia assets.
-
-**Output:** `[course_id]/materials/[canvas_subfolder]/[filename]`
-A `download_log.json` per course prevents re-downloading already-present files.
-
-#### Common flags
-
-| Flag | Description |
-|------|-------------|
-| `--course ID` | Restrict all operations to a single course |
-| `--secretly` | Random delays between downloads to avoid rate-limiting (5–15 min between videos, 2–5 min between folders) with tqdm countdown bars |
-| `--path PATH` | Override base directory (default: directory of `downloader.py`) |
-
-#### Stealth mode example
-
-```bash
-python downloader.py --download-video-all --course 85427 --secretly
-python downloader.py --download-material-all --secretly --path /data/courses
-```
+Every page has a **terminal panel** pinned to the bottom that streams live output. The **Stop** button (×) cancels the running process at any time.
 
 ---
 
-### 2. Transcribe videos — `extract_caption.py`
+## First-time setup
 
-Transcribes `.mp4` lecture videos to word-level timestamped JSON using **faster-whisper large-v3** on GPU. The model reads video files directly (no separate audio extraction step).
+### 1. Connection settings
 
-```bash
-python extract_caption.py              # process all pending videos
-python extract_caption.py --video PATH # single video file
-```
+Open **Settings** and fill in the **Connection** card:
 
-**Requires:** CUDA GPU (enforced at startup — will not silently fall back to CPU).
+| Field | Value |
+|-------|-------|
+| **Canvas URL** | Your institution's Canvas domain (e.g. `canvas.nus.edu.sg`). The `https://` prefix is added automatically. |
+| **Panopto Host** | Panopto video host (e.g. `mediaweb.ap.panopto.com`). Leave blank — it is auto-detected the first time you list videos. |
+| **Output Dir** | Directory where all pipeline files are stored (default: `~/AutoNote`). |
 
-**Output:** `[course_id]/captions/[title].json`
-Each JSON contains word-level timestamps and confidence scores.
+### 2. API keys
 
----
+Fill in the **API Keys & Credentials** card:
 
-### 3. Align transcript to slides — `semantic_alignment.py`
+| Field | Required for |
+|-------|-------------|
+| **Canvas Token** | Downloading materials and listing videos. Get it from Canvas → Account → Settings → New Access Token. |
+| **OpenAI API Key** | Note generation when using an OpenAI model (gpt-5.1, gpt-4.1, o3, …). |
+| **Anthropic API Key** | Note generation when using a Claude model. |
+| **Gemini API Key** | Note generation when using a Gemini model (get from Google AI Studio). |
 
-Maps Whisper transcript segments to specific slide pages using dense semantic search.
+Click **Save All**, then **Refresh Courses**. Your enrolled courses appear in the Dashboard and all course dropdowns.
 
-```bash
-# Align one caption to one slide file
-python semantic_alignment.py \
-    --caption  85427/captions/lecture.json \
-    --slides   85427/materials/LectureNotes/L02.pdf
+### 3. ML environment
 
-# Align one caption to multiple slide files (multi-part lecture)
-python semantic_alignment.py \
-    --caption  85427/captions/L04.json \
-    --slides   85427/materials/L04-Part1.pdf 85427/materials/L04-Part2.pdf
+The pipeline uses GPU-accelerated ML libraries (Whisper, sentence-transformers, FAISS) that are kept in a dedicated virtual environment at `~/.auto_note/venv/`. This environment is separate from the app itself so that heavy ML dependencies do not ship with the AppImage.
 
-# Auto-discover all unaligned pairs in a course
-python semantic_alignment.py --course 85427
-```
+Go to **Settings → ML Environment** and click **Install ML Environment**. The installer:
 
-**How it works:**
+1. Detects Python from your login shell or common conda/system locations
+2. Creates a fresh venv
+3. Detects CUDA and installs the matching version of PyTorch
+4. Installs all pipeline packages (whisper, sentence-transformers, canvasapi, PanoptoDownloader, …)
+5. Installs Playwright's Chromium browser (used to authenticate Panopto video downloads)
 
-1. Extracts text from each slide (PDF / PPTX / DOCX), including speaker notes
-2. For slides with fewer than 20 words, uses **GPT-4o-mini vision** to generate a text description of the visual content (result cached in `[slide].image_cache.json`)
-3. Embeds all slides with **all-mpnet-base-v2** (sentence-transformers, GPU) into a FAISS cosine-similarity index
-4. Queries the index for each transcript segment, using a ±30 s context window to pool nearby speech into richer queries
-5. Applies **Viterbi temporal smoothing** with a forward bias so slide assignments only move forward in time (with configurable backward-revisit cost)
-6. Flags segments that match no slide well as `off_slide`
-7. Collapses consecutive same-slide assignments into a compact timeline
+This only needs to be done once. Use **Reinstall** if packages become broken.
 
-**Caption↔slide file matching (auto-discovery):**
-When running `--course`, the aligner must decide which slide file(s) belong to each caption. It tries three strategies in order:
-
-| Priority | Strategy | Example |
-|----------|-----------|---------|
-| 1 | **Lecture number** — regex extracts the number from both filenames and pairs equal numbers | `L02-foo.json` → `L02-Processes-Threads.pdf` |
-| 2 | **Token overlap** — Jaccard similarity on filename words (threshold > 0.05) | `Processes-Threads.json` → `L02-Processes-Threads.pdf` |
-| 3 | **Content embedding** — samples transcript text and slide text, embeds both with `all-mpnet-base-v2`, pairs the slide file with the highest cosine similarity (threshold ≥ 0.20) | `alpha_recording.json` → `L02-Processes-Threads.pdf` (sim=0.79) |
-
-The content-based fallback means **files can be named anything** — if name matching fails, the aligner reads the actual content to find the right pair. A `[content-match]` line in the log indicates the fallback fired.
-
-**Multi-file support:** When multiple slide files share the same lecture number (e.g. `L04-Part1.pdf` and `L04-Part2.pdf`), the aligner builds a single combined FAISS index, runs one Viterbi pass, then splits results back per file with local slide numbering. One JSON is saved per slide file (named `{slide_stem}.json`) so `note_generation.py` can locate them automatically.
-
-**Output:** `[course_id]/alignment/[slide_stem].json`
+> **GPU note:** Whisper large-v3 and the sentence-transformer embedding model both run on GPU. A CUDA-capable GPU with ≥ 8 GB VRAM is recommended. The app still works on CPU but transcription will be much slower.
 
 ---
 
-### 4. Generate study notes — `note_generation.py`
+## Running the full pipeline
 
-Produces a single comprehensive Markdown note file covering all lectures in a course.
+Go to **Pipeline**, select a course from the dropdown, and click **Run Pipeline**.
 
-```bash
-python note_generation.py --course 85427 --course-name "CS3210 Parallel Computing"
-```
+### Pipeline steps (executed in order)
 
-#### Key options
+| # | Step | What it does |
+|---|------|-------------|
+| 1 | **Download materials** | Downloads all lecture slides, PDFs, and other files from Canvas |
+| 2 | **Download videos** | Downloads all Panopto lecture recordings (MP4) |
+| 3 | **Transcribe videos** | Runs Whisper on each video to produce timestamped caption JSON |
+| 4 | **Align transcripts** | Maps each caption segment to the slide page being shown at that moment |
+| 5 | **Generate study notes** | Sends slides + aligned transcripts to an LLM to generate a Markdown note file |
 
-| Flag | Description |
-|------|-------------|
-| `--detail 0–10` | Note verbosity. `5` = medium (bullet points), `8` = detailed paragraphs (default `7`) |
-| `--lectures N-N` | Process a subset of lectures, e.g. `--lectures 1-3` or `--lectures 1,4,5` |
-| `--force` | Regenerate all sections even if cached |
-| `--merge-only` | Skip generation; re-run only the merge + image filter pass |
-| `--iterate` | Auto-increase detail level until self-score target is reached |
+Each step only runs if the previous step succeeded. You can uncheck any step to skip it.
 
-#### Architecture
+### Pipeline options
 
-**Section-by-section generation:**
-Each lecture is split into chunks of ~15 slides. Each chunk is sent to GPT in a separate API call and saved as an individual section file (`sections/L04_S02.md`). On re-runs, existing section files are reused unless `--force` is set.
+| Option | Description |
+|--------|-------------|
+| **Stealth mode** | Adds random delays between downloads (5–15 min between videos, 2–5 min between material folders) to avoid rate-limiting. Enable when downloading in bulk. |
+| **Course name** | Name that appears in the final notes file (auto-filled from any existing notes). |
+| **Detail level** | Controls note verbosity (see [Detail levels](#detail-levels) below). |
+| **Lecture filter** | Process only specific lectures, e.g. `1-5` or `1,3,5`. Leave blank for all. |
+| **Force regenerate** | Re-generate note sections even if they were already cached on disk. |
 
-**Multi-file lecture support:**
-Multiple slide files for the same lecture number (e.g. `L04-Part1.pdf` and `L04-Part2.pdf`) are grouped automatically. Their sections are written to separate files (`L04_S01.md`, `L04_F02_S01.md`) and merged under a single `## Lecture 4` heading with `### Part 1:` / `### Part 2:` sub-headings.
+---
 
-**Detail levels:**
+## Download page
+
+For fine-grained control without running the full pipeline.
+
+### Videos
+
+| Button | Action |
+|--------|--------|
+| **List videos** | Show all available Panopto videos with their numbers |
+| **Download all pending** | Download every video not yet in the manifest |
+| **Download selected** | Enter video number(s) in the text field (e.g. `1 3 5`), then click |
+
+### Course materials
+
+| Button | Action |
+|--------|--------|
+| **List materials** | Show all downloadable files on Canvas with sizes |
+| **Download all pending** | Download all files not yet in `download_log.json` |
+| **Download selected** | Enter partial filename(s), space-separated, then click |
+
+**Smart size filter:** If a course has more than 1 GB of files, an LLM automatically identifies only lecture notes and tutorials for download, skipping large media assets.
+
+All files are saved under the configured output directory:
+- Videos → `<course_id>/videos/<title>.mp4`
+- Materials → `<course_id>/materials/<canvas_subfolder>/<filename>`
+
+---
+
+## Transcribe page
+
+Transcribes MP4 videos to word-level timestamped JSON using Whisper.
+
+- **Transcribe all pending** — processes every video in the download manifest that does not yet have a caption file
+- **Single video path** — enter a specific `.mp4` path to transcribe just that file
+
+**Automatic backend selection:** If a CUDA GPU is available, faster-whisper runs locally. Otherwise, the OpenAI Whisper API is used (requires an OpenAI key in Settings).
+
+Caption files are saved to `<course_id>/captions/<title>.json`.
+
+---
+
+## Align page
+
+Maps each Whisper caption segment to the slide page being presented at that moment.
+
+### Auto-discover (recommended)
+
+Select a course and click **Run auto-align**. The aligner finds all unaligned caption/slide pairs automatically using a three-strategy matching system:
+
+1. **Lecture number** — matches `L02-foo.json` to `L02-Processes.pdf`
+2. **Token overlap** — Jaccard similarity on filename words
+3. **Content embedding** — embeds transcript samples and slide text; pairs by highest cosine similarity (fires when filenames don't match at all)
+
+### Manual alignment
+
+Enter a specific caption JSON path and one or more slide file paths (space-separated for multi-part lectures), then click **Align**.
+
+Alignment results are saved to `<course_id>/alignment/<slide_stem>.json`.
+
+---
+
+## Generate Notes page
+
+Generates a single comprehensive Markdown study note file covering all lectures.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| **Course name** | Used as the note file name and title. Auto-filled if notes already exist. |
+| **Lecture filter** | Generate notes for specific lectures only (`1-5` or `1,3,5`). |
+| **Detail level** | 0–10 slider (see below). Default: 7. |
+| **Force regenerate** | Overwrite existing cached section files. |
+| **Merge-only** | Re-run the merge and image-filter pass without re-generating any sections. Useful when you change only the merge prompt or image filter. |
+| **Iterative mode** | Automatically increases the detail level until the self-score target is reached. |
+
+### Detail levels
 
 | Range | Style |
 |-------|-------|
 | 0–2 | Bullet-point outline only |
-| 3–5 | Hierarchical bullets — main concept + indented sub-details |
+| 3–5 | Hierarchical bullets — main concepts with indented sub-details |
 | 6–8 | Full paragraphs with examples and analogies |
-| 9–10 | Maximum detail including edge cases and cross-lecture links |
+| 9–10 | Exhaustive — includes edge cases and cross-lecture connections |
 
-**Image injection:**
-Slide images are rendered to `notes/images/L{N}/` and injected into notes at relevant positions. For multi-file lectures, additional files render to `notes/images/L{N}_F{idx}/`.
-
-**Image filter agent:**
-After all sections are merged, a vision-based agent (GPT-4o-mini) reviews every embedded image and removes slides that do not contain meaningful visual elements. The decision priority is:
-
-1. Slide has a cached visual description from semantic alignment → **KEEP**
-2. Slide text matches a title/divider pattern → **REMOVE**
-3. All other slides → **vision API** with a structured prompt that keeps diagrams, flowcharts, architecture illustrations, graphs, and tables, and removes text-only or code-only slides
-
-**Generator–verifier loop:**
-Each section draft is verified by `gpt-4.1-mini`, which checks technical term accuracy against the slide content. Suspicious verifier responses are discarded to prevent overwriting valid drafts.
-
-**Exam notes:**
-A final `## Exam Notes` section is auto-generated summarising up to 30 key exam points across all lectures.
-
-**Self-scoring:**
-After generation, the pipeline prints a heuristic self-score (word coverage, terminology hit-rate, callout density, code block count).
-
-#### Output structure
+### Output structure
 
 ```
-[course_id]/notes/
-├─ CourseName_notes.md          Final merged note
-├─ CourseName_notes.score.json  Self-score breakdown
-├─ sections/
-│   ├─ L01_S01.md               Cached section files (single-file lectures)
-│   ├─ L04_F02_S01.md           Cached section files (multi-file lecture, part 2)
-│   └─ exam_notes.md
-└─ images/
-    ├─ L01/                     Rendered slide PNGs (single-file lectures)
-    └─ L04_F02/                 Rendered slide PNGs (multi-file lecture, part 2)
+<Output Dir>/<course_id>/notes/
+├── CourseName_notes.md          Final merged note
+├── CourseName_notes.score.json  Self-score breakdown
+├── sections/
+│   ├── L01_S01.md               Cached section files (resumable)
+│   └── exam_notes.md
+└── images/
+    ├── L01/                     Rendered slide images
+    └── L02/
 ```
+
+Notes are **resumable**: if generation stops midway, re-running skips sections already saved on disk. Use **Force regenerate** to redo them.
+
+---
+
+## Settings — advanced options
+
+### Tunable constants
+
+Settings exposes all configurable parameters directly in the UI. Changes are written back into the pipeline scripts.
+
+**Transcription**
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Whisper model variant | Size vs. accuracy trade-off | `large-v3` |
+| Transcription language | Language hint for Whisper; auto-detect works for most lectures | auto-detect |
+
+Available Whisper models: `tiny`, `base`, `small`, `medium`, `large`, `large-v2`, `large-v3`, `large-v3-turbo`, `distil-large-v3`.
+
+**Alignment**
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Sentence-transformer model | Embedding model for semantic matching | `all-mpnet-base-v2` |
+| Context window (s) | Seconds of speech pooled around each segment for richer queries | `30` |
+| Off-slide cosine cutoff | Segments below this similarity are marked `off_slide` | `0.28` |
+| Temporal prior σ | Strength of the forward-time prior in Viterbi smoothing | `5` |
+
+Available embedding models: `all-mpnet-base-v2` (best quality), `all-MiniLM-L12-v2` (balanced), `all-MiniLM-L6-v2` (fast), `paraphrase-multilingual-mpnet-base-v2`.
+
+**Note generation**
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Note language | Language for generated notes | English |
+| Note generation LLM | Primary model used to write sections | `gpt-5.1` |
+| Verification LLM | Lighter model used to check each section for accuracy | `gpt-4.1-mini` |
+| Default detail level | Starting detail level when none is specified | `8` |
+| Slides per GPT call | Slides sent in one LLM call (one section) | `15` |
+| Self-score target | Minimum score to accept in iterative mode | `8.0` |
+
+### Supported LLM models
+
+| Provider | Note generation | Verification |
+|----------|----------------|-------------|
+| **OpenAI** | gpt-5.1, gpt-5.2, gpt-4.1, gpt-4.1-mini, o3, o1 | gpt-4.1-mini, gpt-4.1, gpt-5.1 |
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Sonnet 4.5, Sonnet 3.5, Haiku 4.5 | Claude Haiku 4.5, Sonnet 3.5, Sonnet 4.5 |
+| **Google** | Gemini 2.5 Pro, Gemini 2.5 Flash, Gemini 2.0 Flash, Gemini 1.5 Pro | Gemini 2.5 Flash, Gemini 2.0 Flash |
+
+The API key for the selected provider must be saved in Settings.
 
 ---
 
 ## Incremental updates
 
-| Scenario | Command |
-|----------|---------|
-| New lecture added | Normal run — new sections generated, existing ones cached |
-| New slides added to existing lecture | `--lectures N --force` to regenerate that lecture only |
-| New video/alignment added to existing lecture | `--lectures N --force` |
-| Only prompts or image filter changed | `--merge-only` to re-merge without regenerating sections |
+| Scenario | What to do |
+|----------|-----------|
+| New lecture added to Canvas | Re-run the full pipeline — existing sections are cached, only new ones are generated |
+| Slides updated for an existing lecture | **Generate Notes → Lecture filter + Force regenerate** for that lecture |
+| Want to change note style or language | Update settings, then **Generate Notes → Merge-only** |
+| Pipeline stopped partway | Just run again — already-completed sections are skipped automatically |
 
 ---
 
-## Utilities
+## File layout
 
-### `alignment_parser.py`
+All pipeline output lives under the configured **Output Dir** (`~/AutoNote` by default):
 
-Converts the full alignment JSON (~300 KB) into a compact per-slide representation (~30 KB) for token-efficient LLM prompting. Used internally by `note_generation.py`.
+```
+~/AutoNote/
+├── manifest.json                    Video download manifest (tracks download state)
+├── <course_id>/
+│   ├── videos/                      Downloaded MP4 lecture recordings
+│   ├── materials/                   Downloaded slides, PDFs, etc.
+│   │   └── <canvas_folder>/
+│   ├── captions/                    Whisper transcript JSON per video
+│   ├── alignment/                   Alignment JSON per slide file
+│   └── notes/
+│       ├── <CourseName>_notes.md    Final generated note
+│       ├── sections/                Per-section cache (enables resume)
+│       └── images/                  Rendered slide images embedded in notes
+└── download_log.json                Per-course material download log
+```
 
-```bash
-python alignment_parser.py 85427/alignment/lecture.json
-python alignment_parser.py 85427/alignment/lecture.json --out compact.json
+App configuration and the ML environment are stored in `~/.auto_note/`:
+
+```
+~/.auto_note/
+├── config.json          Canvas URL, Panopto host, output dir
+├── canvas_token.txt     Canvas API token
+├── openai_api.txt       OpenAI API key
+├── anthropic_key.txt    Anthropic API key
+├── gemini_api.txt       Gemini API key
+├── scripts/             Pipeline scripts installed from the AppImage
+└── venv/                ML virtual environment (installed via Settings)
 ```
 
 ---
 
-## Hardware requirements
+## Troubleshooting
 
-| Component | Requirement |
-|-----------|-------------|
-| GPU | CUDA-capable (RTX series recommended; tested on RTX 5070 Ti 16 GB) |
-| VRAM | ≥ 8 GB for Whisper large-v3 + sentence-transformers |
-| PyTorch | 2.10+ with CUDA 12.8 for Blackwell (sm_120) support |
+**"No courses loaded" on the Dashboard**
+→ Go to Settings, enter Canvas URL and Canvas token, click Save All, then Refresh Courses.
 
----
+**Video list shows 0 videos for a course**
+→ The Panopto host has not been detected yet. Click **List videos** once; it is auto-detected from browser network requests. If it still fails, enter the Panopto domain manually in Settings → Panopto Host (e.g. `mediaweb.ap.panopto.com`).
 
-## Notes on writing style
+**Transcription is very slow**
+→ The app is running on CPU. Ensure a CUDA GPU is present and PyTorch was installed with GPU support. Use Settings → ML Environment → **Reinstall** if needed.
 
-Notes are written in **Chinese** by default (as configured in `_SYSTEM` prompt), with English technical terms preserved inline (e.g. 进程 (Process)). The prompt enforces:
+**ModuleNotFoundError when running the pipeline**
+→ The ML environment is missing packages. Go to Settings → ML Environment → **Reinstall**.
 
-- No professor-centric narration ("老师说…", "教授指出…") — only first-person knowledge statements
-- LaTeX for formulas (`$...$` inline, `$$...$$` block)
-- Complete, compilable code examples with correct language tags
-- `> [!IMPORTANT]` callout blocks for exam-critical content
+**Note generation produces empty or very short sections**
+→ If using a reasoning model (o3, gpt-5.1), ensure the model is receiving enough output tokens. The app sets `max_completion_tokens=10000` automatically for reasoning models.
+
+**Pipeline jumps ahead to a later step after an error**
+→ Update to the latest version (v0.6.35+). Earlier builds had a bug where the pipeline chain advanced even when a step failed.
