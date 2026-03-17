@@ -253,7 +253,7 @@ def _notes_path(course_id: int) -> Path | None:
 
 def _course_name_from_notes(course_id: int) -> str:
     base = COURSES.get(course_id, f"Course {course_id}")
-    d    = PROJECT_DIR / str(course_id) / "notes"
+    d    = DATA_DIR / str(course_id) / "notes"
     if d.exists():
         for md in d.glob("*.md"):
             stem = md.stem.replace("_notes", "").replace("_", " ")
