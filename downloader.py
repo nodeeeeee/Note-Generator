@@ -36,16 +36,27 @@ from tqdm import tqdm
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 PROJECT_DIR   = Path(__file__).parent
-MANIFEST_FILE = PROJECT_DIR / "manifest.json"
+MANIFEST_FILE = None   # set after DATA_DIR is resolved below
+
+# When bundled as an AppImage, __file__ resolves to a temp dir deleted on exit.
+# Credentials and config must be read from the persistent ~/.auto_note/ directory.
+if getattr(sys, "frozen", False):
+    DATA_DIR = Path.home() / ".auto_note"
+else:
+    DATA_DIR = PROJECT_DIR
+
+MANIFEST_FILE = DATA_DIR / "manifest.json"
 
 # ── User-configurable connection settings (set via GUI Settings page) ──────────
-_config_file = PROJECT_DIR / "config.json"
+_config_file = DATA_DIR / "config.json"
 _config: dict = json.load(open(_config_file)) if _config_file.exists() else {}
 
-CANVAS_URL   = _config.get("CANVAS_URL",   "")
+CANVAS_URL   = _config.get("CANVAS_URL",   "").strip().rstrip("/")
+if CANVAS_URL and not CANVAS_URL.startswith(("http://", "https://")):
+    CANVAS_URL = "https://" + CANVAS_URL
 PANOPTO_HOST = _config.get("PANOPTO_HOST", "")
 
-_canvas_token_file = PROJECT_DIR / "canvas_token.txt"
+_canvas_token_file = DATA_DIR / "canvas_token.txt"
 CANVAS_TOKEN = (
     _canvas_token_file.read_text().strip()
     if _canvas_token_file.exists() else
@@ -649,7 +660,7 @@ def _classify_with_ai(files: list[dict], course_name: str) -> list[dict]:
     import anthropic
     key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
-        kf = PROJECT_DIR / "anthropic_key.txt"
+        kf = DATA_DIR / "anthropic_key.txt"
         if kf.exists():
             key = kf.read_text().strip()
     client = anthropic.Anthropic(api_key=key)
@@ -975,7 +986,7 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
-    base_dir = Path(args.path) if args.path else PROJECT_DIR
+    base_dir = Path(args.path) if args.path else DATA_DIR
     canvas   = Canvas(CANVAS_URL, CANVAS_TOKEN)
 
     # ── --course-list ──────────────────────────────────────────────────────────

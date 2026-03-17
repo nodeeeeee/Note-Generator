@@ -39,6 +39,11 @@ import faiss
 import numpy as np
 
 PROJECT_DIR = Path(__file__).parent
+import sys as _sys
+if getattr(_sys, "frozen", False):
+    DATA_DIR = Path.home() / ".auto_note"
+else:
+    DATA_DIR = PROJECT_DIR
 
 # ── Tunable knobs ─────────────────────────────────────────────────────────────
 
@@ -84,7 +89,7 @@ def _get_openai_key() -> str:
     import os
     key = os.environ.get("OPENAI_API_KEY", "")
     if not key:
-        key_file = PROJECT_DIR / "openai_api.txt"
+        key_file = DATA_DIR / "openai_api.txt"
         if key_file.exists():
             key = key_file.read_text().strip()
     return key
@@ -1082,7 +1087,7 @@ def _content_match_slide_group(
 
 
 def process_course(course_id: int | str) -> None:
-    course_dir = PROJECT_DIR / str(course_id)
+    course_dir = DATA_DIR / str(course_id)
     captions   = sorted((course_dir / "captions").glob("*.json"))
     all_slides = _candidate_slides(course_dir)
     out_dir    = course_dir / "alignment"

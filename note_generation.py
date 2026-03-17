@@ -30,6 +30,11 @@ from tqdm import tqdm
 import alignment_parser
 
 PROJECT_DIR = Path(__file__).parent
+import sys as _sys
+if getattr(_sys, "frozen", False):
+    DATA_DIR = Path.home() / ".auto_note"
+else:
+    DATA_DIR = PROJECT_DIR
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -481,7 +486,7 @@ def _make_client(provider: str):
         from openai import OpenAI
         key = os.environ.get("GEMINI_API_KEY", "")
         if not key:
-            kf = PROJECT_DIR / "gemini_api.txt"
+            kf = DATA_DIR / "gemini_api.txt"
             if kf.exists():
                 key = kf.read_text().strip()
         if not key:
@@ -494,7 +499,7 @@ def _make_client(provider: str):
         from anthropic import Anthropic
         key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not key:
-            kf = PROJECT_DIR / "anthropic_key.txt"
+            kf = DATA_DIR / "anthropic_key.txt"
             if kf.exists():
                 key = kf.read_text().strip()
         if not key:
@@ -504,7 +509,7 @@ def _make_client(provider: str):
         from openai import OpenAI
         key = os.environ.get("OPENAI_API_KEY", "")
         if not key:
-            kf = PROJECT_DIR / "openai_api.txt"
+            kf = DATA_DIR / "openai_api.txt"
             if kf.exists():
                 key = kf.read_text().strip()
         if not key:
@@ -1295,7 +1300,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.course:
-        course_dir  = PROJECT_DIR / args.course
+        course_dir  = DATA_DIR / args.course
         course_name = args.course_name or f"CS{args.course}"
         lectures    = _discover_lectures(course_dir)
         if args.lectures:

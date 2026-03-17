@@ -448,7 +448,9 @@ class OutputConsole:
                                 no_wrap=False, selectable=True,
                             )
                         )
+                self._lines.update()   # push the ListView itself
                 self.page.update()
+                time.sleep(0.02)       # yield to Flet event loop so repaint fires
 
         def _worker() -> None:
             try:

@@ -23,7 +23,11 @@ import tempfile
 from pathlib import Path
 
 PROJECT_DIR   = Path(__file__).parent
-MANIFEST_FILE = PROJECT_DIR / "manifest.json"
+if getattr(sys, "frozen", False):
+    DATA_DIR = Path.home() / ".auto_note"
+else:
+    DATA_DIR = PROJECT_DIR
+MANIFEST_FILE = DATA_DIR / "manifest.json"
 
 # ── Tunable constants ─────────────────────────────────────────────────────────
 
@@ -36,7 +40,7 @@ WHISPER_LANGUAGE   = None       # None = auto-detect
 _API_CHUNK_MINUTES = 60
 
 # OpenAI API key: read from openai_api.txt or OPENAI_API_KEY env var
-_openai_key_file = PROJECT_DIR / "openai_api.txt"
+_openai_key_file = DATA_DIR / "openai_api.txt"
 _OPENAI_API_KEY  = (
     _openai_key_file.read_text().strip()
     if _openai_key_file.exists() else
