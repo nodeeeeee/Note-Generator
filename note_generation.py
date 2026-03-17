@@ -31,8 +31,9 @@ import alignment_parser
 
 PROJECT_DIR = Path(__file__).parent
 import sys as _sys
-if getattr(_sys, "frozen", False):
-    DATA_DIR = Path.home() / ".auto_note"
+_AUTO_NOTE_DIR = Path.home() / ".auto_note"
+if getattr(_sys, "frozen", False) or PROJECT_DIR == _AUTO_NOTE_DIR / "scripts":
+    DATA_DIR = _AUTO_NOTE_DIR
 else:
     DATA_DIR = PROJECT_DIR
 

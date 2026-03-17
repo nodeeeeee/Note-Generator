@@ -23,8 +23,9 @@ import tempfile
 from pathlib import Path
 
 PROJECT_DIR   = Path(__file__).parent
-if getattr(sys, "frozen", False):
-    DATA_DIR = Path.home() / ".auto_note"
+_AUTO_NOTE_DIR = Path.home() / ".auto_note"
+if getattr(sys, "frozen", False) or PROJECT_DIR == _AUTO_NOTE_DIR / "scripts":
+    DATA_DIR = _AUTO_NOTE_DIR
 else:
     DATA_DIR = PROJECT_DIR
 MANIFEST_FILE = DATA_DIR / "manifest.json"

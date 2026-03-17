@@ -38,10 +38,11 @@ from tqdm import tqdm
 PROJECT_DIR   = Path(__file__).parent
 MANIFEST_FILE = None   # set after DATA_DIR is resolved below
 
-# When bundled as an AppImage, __file__ resolves to a temp dir deleted on exit.
-# Credentials and config must be read from the persistent ~/.auto_note/ directory.
-if getattr(sys, "frozen", False):
-    DATA_DIR = Path.home() / ".auto_note"
+# Persistent data dir: ~/.auto_note/ when installed (AppImage or scripts/ copy),
+# else the project directory (dev mode).
+_AUTO_NOTE_DIR = Path.home() / ".auto_note"
+if getattr(sys, "frozen", False) or PROJECT_DIR == _AUTO_NOTE_DIR / "scripts":
+    DATA_DIR = _AUTO_NOTE_DIR
 else:
     DATA_DIR = PROJECT_DIR
 
