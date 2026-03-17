@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import queue
 import re
 import subprocess
 import sys
@@ -436,42 +435,18 @@ class OutputConsole:
         self.write(f"$ {display_cmd}\n",
                    color=ft.Colors.with_opacity(0.40, ft.Colors.WHITE))
 
-        # Line queue: (text, color). _flush_thread drains it every 50 ms.
-        _line_q: queue.Queue = queue.Queue()
-        _FLUSH_INTERVAL = 0.05   # seconds between UI updates
+        _UPDATE_INTERVAL = 0.1   # seconds between UI refreshes while streaming
+        _default_color   = ft.Colors.with_opacity(0.88, ft.Colors.WHITE)
 
-        def _flush_thread() -> None:
-            """Drain the line queue and do a single page.update() per interval."""
-            default_color = ft.Colors.with_opacity(0.88, ft.Colors.WHITE)
-            while True:
-                batch: list[tuple[str, str | None]] = []
-                try:
-                    # Block until the first item arrives
-                    batch.append(_line_q.get(timeout=1.0))
-                except queue.Empty:
-                    if not state.running:
-                        break
-                    continue
-                # Drain everything else that arrived in this window
-                deadline = time.monotonic() + _FLUSH_INTERVAL
-                while time.monotonic() < deadline:
-                    try:
-                        batch.append(_line_q.get_nowait())
-                    except queue.Empty:
-                        break
-                # Append all lines, one page.update() for the whole batch
-                for text, color in batch:
-                    for line in text.splitlines():
-                        self._lines.controls.append(
-                            ft.Text(
-                                line, size=11, font_family=MONO,
-                                color=color or default_color,
-                                no_wrap=False, selectable=True,
-                            )
-                        )
-                self._lines.update()   # push the ListView itself
-                self.page.update()
-                time.sleep(0.02)       # yield to Flet event loop so repaint fires
+        def _append_line(text: str, color: str | None = None) -> None:
+            for line in text.splitlines():
+                self._lines.controls.append(
+                    ft.Text(
+                        line, size=11, font_family=MONO,
+                        color=color or _default_color,
+                        no_wrap=False, selectable=True,
+                    )
+                )
 
         def _worker() -> None:
             try:
@@ -485,8 +460,9 @@ class OutputConsole:
                     bufsize=1,
                     env=env,
                 )
+                _last_update = time.monotonic()
+                _pending = False
                 for line in state.proc.stdout:
-                    # Filter only the noisiest frozen-importlib bootstrap lines
                     stripped = line.strip()
                     if stripped.startswith("<frozen importlib"):
                         continue
@@ -496,30 +472,38 @@ class OutputConsole:
                         color = C_ERROR
                     elif low.startswith("warning"):
                         color = C_WARN
-                    _line_q.put((line.rstrip(), color))
+                    _append_line(line.rstrip(), color)
+                    _pending = True
+                    now = time.monotonic()
+                    if now - _last_update >= _UPDATE_INTERVAL:
+                        self.page.update()
+                        _last_update = now
+                        _pending = False
+
+                if _pending:
+                    self.page.update()
+
                 state.proc.wait()
                 rc = state.proc.returncode
 
                 if rc == 0:
-                    _line_q.put(("\n✓  Completed successfully.", C_SUCCESS))
+                    _append_line("\n✓  Completed successfully.", C_SUCCESS)
                     self.set_status("✓ done", C_SUCCESS)
-                elif rc == -15:   # SIGTERM from our stop button
-                    pass          # already handled in _on_stop
+                elif rc == -15:
+                    pass
                 else:
-                    _line_q.put((f"\n✗  Exited with code {rc}.", C_ERROR))
+                    _append_line(f"\n✗  Exited with code {rc}.", C_ERROR)
                     self.set_status(f"✗ code {rc}", C_ERROR)
             except Exception as exc:
-                _line_q.put((f"\n✗  {exc}", C_ERROR))
+                _append_line(f"\n✗  {exc}", C_ERROR)
                 self.set_status("✗ error", C_ERROR)
             finally:
-                state.running       = False
-                state.proc          = None
+                state.running          = False
+                state.proc             = None
                 self._stop_btn.visible = False
                 self.page.update()
                 if on_done:
                     on_done()
-
-        threading.Thread(target=_flush_thread, daemon=True).start()
         threading.Thread(target=_worker, daemon=True).start()
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
