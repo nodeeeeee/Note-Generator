@@ -471,23 +471,11 @@ class OutputConsole:
         def _worker() -> None:
             rc = -1
             try:
-                import pty as _pty, io as _io
-                env = {**os.environ, "PYTHONUNBUFFERED": "1",
-                       "TERM": "xterm-256color", "COLUMNS": "100"}
-                master_fd, slave_fd = _pty.openpty()
-                state.proc = subprocess.Popen(
-                    cmd,
-                    stdout=slave_fd, stderr=slave_fd,
-                    close_fds=True,
-                    cwd=str(_get_output_dir()),
-                    env=env,
-                )
-                os.close(slave_fd)
-
-                _MAX_LINES   = 500
-                _ANSI_RE     = re.compile(
+                import io as _io
+                _ANSI_RE  = re.compile(
                     r"\x1b\[[0-9;]*[mABCDEFGHJKST]|\x1b\][^\x07]*\x07"
                 )
+                _MAX_LINES   = 500
                 _last_update = time.monotonic()
                 buf          = ""   # current line being assembled
 
@@ -511,47 +499,91 @@ class OutputConsole:
                     if excess > 0:
                         del self._lines.controls[:excess]
 
-                try:
-                    with _io.open(master_fd, "rb", closefd=True) as master:
-                        while True:
-                            try:
-                                chunk = master.read(4096)
-                            except OSError:
-                                break
-                            if not chunk:
-                                break
-                            text = _ANSI_RE.sub(
-                                "", chunk.decode("utf-8", errors="replace")
-                            )
-                            for ch in text:
-                                if ch == "\r":
-                                    # Carriage return: next chars overwrite
-                                    # the current line — discard old buffer.
-                                    buf = ""
-                                elif ch == "\n":
-                                    if not buf.startswith("<frozen importlib"):
-                                        item = _cur()
-                                        item.value = buf
-                                        low = buf.lower().lstrip()
-                                        if low.startswith(
-                                                ("error", "traceback",
-                                                 "exception")):
-                                            item.color = C_ERROR
-                                        elif low.startswith("warning"):
-                                            item.color = C_WARN
-                                        _new_line()
-                                    buf = ""
-                                else:
-                                    buf += ch
+                def _process_chunk(raw: bytes) -> None:
+                    nonlocal buf
+                    text = _ANSI_RE.sub(
+                        "", raw.decode("utf-8", errors="replace")
+                    )
+                    for ch in text:
+                        if ch == "\r":
+                            buf = ""
+                        elif ch == "\n":
+                            if not buf.startswith("<frozen importlib"):
+                                item = _cur()
+                                item.value = buf
+                                low = buf.lower().lstrip()
+                                if low.startswith(
+                                        ("error", "traceback", "exception")):
+                                    item.color = C_ERROR
+                                elif low.startswith("warning"):
+                                    item.color = C_WARN
+                                _new_line()
+                            buf = ""
+                        else:
+                            buf += ch
 
-                            now = time.monotonic()
-                            if now - _last_update >= _UPDATE_INTERVAL:
-                                if buf:
-                                    _cur().value = buf
-                                self.page.update()
-                                _last_update = now
-                except OSError:
-                    pass
+                # ── Launch subprocess ─────────────────────────────────────
+                # On Unix use a pty so tqdm/rich see a real terminal and use
+                # \r for in-place refresh.  On Windows pty is unavailable so
+                # fall back to a plain pipe (progress bars produce extra lines
+                # but work correctly).
+                env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+                _use_pty = False
+                if sys.platform != "win32":
+                    try:
+                        import pty as _pty
+                        master_fd, slave_fd = _pty.openpty()
+                        env.update({"TERM": "xterm-256color", "COLUMNS": "100"})
+                        state.proc = subprocess.Popen(
+                            cmd,
+                            stdout=slave_fd, stderr=slave_fd,
+                            close_fds=True,
+                            cwd=str(_get_output_dir()),
+                            env=env,
+                        )
+                        os.close(slave_fd)
+                        _use_pty = True
+                    except Exception:
+                        _use_pty = False
+
+                if not _use_pty:
+                    state.proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        cwd=str(_get_output_dir()),
+                        env=env,
+                    )
+
+                # ── Stream output ─────────────────────────────────────────
+                if _use_pty:
+                    try:
+                        with _io.open(master_fd, "rb", closefd=True) as master:
+                            while True:
+                                try:
+                                    chunk = master.read(4096)
+                                except OSError:
+                                    break
+                                if not chunk:
+                                    break
+                                _process_chunk(chunk)
+                                now = time.monotonic()
+                                if now - _last_update >= _UPDATE_INTERVAL:
+                                    if buf:
+                                        _cur().value = buf
+                                    self.page.update()
+                                    _last_update = now
+                    except OSError:
+                        pass
+                else:
+                    for line in state.proc.stdout:
+                        _process_chunk(line.encode())
+                        now = time.monotonic()
+                        if now - _last_update >= _UPDATE_INTERVAL:
+                            if buf:
+                                _cur().value = buf
+                            self.page.update()
+                            _last_update = now
 
                 if buf:
                     _cur().value = buf
