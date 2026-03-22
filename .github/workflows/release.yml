@@ -51,16 +51,21 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libgtk-3-dev libglib2.0-dev fuse libfuse2 rpm
 
-      # ── Python setuptools (distutils shim for Python 3.12+) ─────────────────
-      # node-gyp uses distutils.version.StrictVersion which was removed in
-      # Python 3.12. Installing setuptools restores the distutils shim.
-      - name: Install setuptools for node-gyp
-        run: pip install setuptools
+      # ── Python 3.11 for node-gyp ─────────────────────────────────────────────
+      # distutils was removed in Python 3.12. node-gyp (used to rebuild
+      # node-pty) still needs it. Using Python 3.11 avoids the issue entirely.
+      # npm_config_python tells node-gyp exactly which Python to use.
+      - name: Set up Python 3.11 for node-gyp
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       # ── Install npm dependencies ─────────────────────────────────────────────
       - name: Install npm dependencies
         working-directory: electron
         run: npm install
+        env:
+          npm_config_python: python
 
       # ── Build ────────────────────────────────────────────────────────────────
       - name: Build (Linux)
@@ -68,8 +73,8 @@ jobs:
         working-directory: electron
         run: npm run build-linux
         env:
-          # Disable code-signing; we ship unsigned builds
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          npm_config_python: python
 
       - name: Build (Windows)
         if: matrix.platform == 'windows'
@@ -77,6 +82,7 @@ jobs:
         run: npm run build-win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          npm_config_python: python
 
       - name: Build (macOS Intel)
         if: matrix.platform == 'macos-intel'
@@ -84,6 +90,7 @@ jobs:
         run: npm run build-mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          npm_config_python: python
 
       - name: Build (macOS ARM)
         if: matrix.platform == 'macos-arm'
@@ -91,6 +98,7 @@ jobs:
         run: npm run build-mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          npm_config_python: python
 
       # ── Upload artifact for debugging ────────────────────────────────────────
       - name: Upload build artifact
