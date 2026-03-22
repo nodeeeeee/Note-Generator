@@ -50,9 +50,9 @@ WHISPER_MODEL_SIZE = "large-v3"
 WHISPER_BEAM_SIZE  = 5
 WHISPER_LANGUAGE   = None       # None = auto-detect
 
-# Audio chunk size for OpenAI API (minutes). 60 min @ 32 kbps mono ≈ 14 MB,
-# well under the 25 MB per-request limit.
-_API_CHUNK_MINUTES = 60
+# Audio chunk size for OpenAI API (minutes). 20 min @ 32 kbps mono ≈ 4.8 MB,
+# well under the 25 MB per-request limit with a comfortable safety margin.
+_API_CHUNK_MINUTES = 20
 
 # OpenAI API key: read from openai_api.txt or OPENAI_API_KEY env var
 _openai_key_file = DATA_DIR / "openai_api.txt"
@@ -167,8 +167,9 @@ def _api_segments_to_schema(api_segs: list, time_offset: float = 0.0) -> list:
 def transcribe_api(video_path: Path, caption_path: Path) -> bool:
     """
     Transcribe using OpenAI Whisper API (whisper-1).
-    Extracts audio as 32 kbps mono mp3 in chunks ≤ _API_CHUNK_MINUTES,
-    calls the API per chunk, then merges results.
+    Step 1 — extract full audio from video to [course_dir]/audio/[stem].mp3
+             (reused on retry if already present).
+    Step 2 — split audio into ≤ _API_CHUNK_MINUTES chunks and call the API.
     """
     if caption_path.exists():
         print(f"  [skip] Caption already exists: {caption_path.name}")
@@ -187,8 +188,22 @@ def transcribe_api(video_path: Path, caption_path: Path) -> bool:
 
     client = OpenAI(api_key=_OPENAI_API_KEY)
 
+    # ── Step 1: extract full audio ────────────────────────────────────────────
+    audio_dir  = video_path.parent.parent / "audio"
+    audio_path = audio_dir / (video_path.stem + ".mp3")
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    if audio_path.exists():
+        print(f"  Audio already extracted, reusing: {audio_path.name}")
+    else:
+        print(f"  Extracting audio from video: {video_path.name}")
+        _extract_audio(video_path, audio_path)
+        size_mb = audio_path.stat().st_size / (1024 ** 2)
+        print(f"  Audio saved: {audio_path.name} ({size_mb:.1f} MB)")
+
+    # ── Step 2: chunk & transcribe ────────────────────────────────────────────
     print(f"  Transcribing via OpenAI Whisper API: {video_path.name}")
-    total_dur = _video_duration(video_path)
+    total_dur = _video_duration(audio_path)
     print(f"  Duration: {total_dur:.0f}s")
 
     chunk_sec = _API_CHUNK_MINUTES * 60
@@ -202,14 +217,14 @@ def transcribe_api(video_path: Path, caption_path: Path) -> bool:
     with tempfile.TemporaryDirectory() as tmp:
         for i, start in enumerate(offsets):
             dur = min(chunk_sec, total_dur - start)
-            audio_file = Path(tmp) / f"chunk_{i:03d}.mp3"
+            chunk_file = Path(tmp) / f"chunk_{i:03d}.mp3"
 
-            print(f"  Extracting audio chunk {i+1}/{len(offsets)} "
+            print(f"  Extracting chunk {i+1}/{len(offsets)} "
                   f"({start:.0f}s – {start+dur:.0f}s)...")
-            _extract_audio(video_path, audio_file, start=start, duration=dur)
-
-            print(f"  Calling Whisper API (chunk {i+1}/{len(offsets)})...")
-            with open(audio_file, "rb") as f:
+            _extract_audio(audio_path, chunk_file, start=start, duration=dur)
+            chunk_mb = chunk_file.stat().st_size / (1024 ** 2)
+            print(f"  Sending to API ({chunk_mb:.1f} MB)...")
+            with open(chunk_file, "rb") as f:
                 response = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=f,
