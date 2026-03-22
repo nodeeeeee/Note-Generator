@@ -1,0 +1,66 @@
+{
+  "name": "auto-note",
+  "version": "0.7.0",
+  "description": "AutoNote — lecture notes generator from Canvas recordings",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild",
+    "test": "jest test/",
+    "build-linux": "electron-builder --linux",
+    "build-win": "electron-builder --win",
+    "build-mac": "electron-builder --mac"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "electron-rebuild": "^3.2.9",
+    "jest": "^29.7.0"
+  },
+  "build": {
+    "appId": "com.autonote.app",
+    "productName": "AutoNote",
+    "files": [
+      "**/*",
+      "!node_modules/**/*.md",
+      "!test/**"
+    ],
+    "linux": {
+      "target": "AppImage",
+      "icon": "../assets/icon.png"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "../assets/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "../assets/icon.icns"
+    },
+    "extraResources": [
+      {
+        "from": "../downloader.py",
+        "to": "scripts/downloader.py"
+      },
+      {
+        "from": "../extract_caption.py",
+        "to": "scripts/extract_caption.py"
+      },
+      {
+        "from": "../semantic_alignment.py",
+        "to": "scripts/semantic_alignment.py"
+      },
+      {
+        "from": "../alignment_parser.py",
+        "to": "scripts/alignment_parser.py"
+      },
+      {
+        "from": "../note_generation.py",
+        "to": "scripts/note_generation.py"
+      }
+    ]
+  }
+}
