@@ -44,7 +44,7 @@ MANIFEST_FILE = DATA_DIR / "manifest.json"
 # "gpu"   → always attempt GPU (fall back to API if unavailable)
 # "api"   → always use OpenAI Whisper API
 WHISPER_BACKEND   = os.environ.get("AUTONOTE_WHISPER_BACKEND", "auto")
-VRAM_THRESHOLD_MIB = 16 * 1024   # 16 GB
+VRAM_THRESHOLD_MIB = 15 * 1024   # ~15 GB nominal — accepts 16 GB cards (which report ~15.4 GB)
 
 WHISPER_MODEL_SIZE = "large-v3"
 WHISPER_BEAM_SIZE  = 5
@@ -225,10 +225,21 @@ def transcribe_api(video_path: Path, caption_path: Path) -> bool:
                                                  lang_full[:2].lower())
                 print(f"  Language: {lang_full} ({detected_lang})")
 
-            segs = _api_segments_to_schema(
-                response.model_dump().get("segments", []),
-                time_offset=start,
-            )
+            resp_dict = response.model_dump()
+            api_segs  = resp_dict.get("segments", [])
+            api_words = resp_dict.get("words", [])
+
+            # The API returns words at the top level, not nested inside segments.
+            # Distribute word-level timestamps into their parent segment.
+            if api_words:
+                w_idx = 0
+                for seg in api_segs:
+                    seg["words"] = []
+                    while w_idx < len(api_words) and api_words[w_idx]["start"] < seg["end"]:
+                        seg["words"].append(api_words[w_idx])
+                        w_idx += 1
+
+            segs = _api_segments_to_schema(api_segs, time_offset=start)
             # Re-number segment IDs to be globally unique
             base_id = len(all_segments)
             for j, s in enumerate(segs):
