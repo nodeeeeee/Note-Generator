@@ -22,6 +22,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Prevent console windows flashing on Windows when spawning ffprobe/ffmpeg
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
 PROJECT_DIR   = Path(__file__).parent
 _AUTO_NOTE_DIR = Path.home() / ".auto_note"
 if os.environ.get("AUTONOTE_DATA_DIR"):
@@ -113,6 +116,7 @@ def _video_duration(video_path: Path) -> float:
         ["ffprobe", "-v", "quiet", "-print_format", "json",
          "-show_format", str(video_path)],
         capture_output=True, text=True, check=True,
+        creationflags=_SUBPROCESS_FLAGS,
     )
     return float(json.loads(result.stdout)["format"]["duration"])
 
@@ -126,7 +130,7 @@ def _extract_audio(video_path: Path, out_path: Path,
     if duration is not None:
         cmd += ["-t", str(duration)]
     cmd += ["-vn", "-ar", "16000", "-ac", "1", "-b:a", "32k", str(out_path)]
-    subprocess.run(cmd, capture_output=True, check=True)
+    subprocess.run(cmd, capture_output=True, check=True, creationflags=_SUBPROCESS_FLAGS)
 
 
 def _api_segments_to_schema(api_segs: list, time_offset: float = 0.0) -> list:

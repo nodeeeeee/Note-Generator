@@ -60,7 +60,7 @@ MANIFEST_FILE = DATA_DIR / "manifest.json"
 
 # ── User-configurable connection settings (set via GUI Settings page) ──────────
 _config_file = DATA_DIR / "config.json"
-_config: dict = json.load(open(_config_file)) if _config_file.exists() else {}
+_config: dict = json.load(open(_config_file, encoding="utf-8")) if _config_file.exists() else {}
 
 CANVAS_URL   = _config.get("CANVAS_URL",   "").strip().rstrip("/")
 if CANVAS_URL and not CANVAS_URL.startswith(("http://", "https://")):
@@ -107,14 +107,14 @@ def _is_academic(course) -> bool:
 
 def _load_json(path: Path) -> dict:
     if path.exists():
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     return {}
 
 
 def _save_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 
@@ -313,9 +313,9 @@ def _get_panopto_tab_folder(course_id: int) -> tuple[str | None, list[dict], str
             tqdm.write(f"  [info] Auto-detected PANOPTO_HOST: {PANOPTO_HOST}")
             # Save to config so future sessions don't need to re-detect.
             try:
-                cfg = json.load(open(_config_file)) if _config_file.exists() else {}
+                cfg = json.load(open(_config_file, encoding="utf-8")) if _config_file.exists() else {}
                 cfg["PANOPTO_HOST"] = PANOPTO_HOST
-                with open(_config_file, "w") as f:
+                with open(_config_file, "w", encoding="utf-8") as f:
                     json.dump(cfg, f, indent=2)
             except Exception:
                 pass
@@ -437,9 +437,9 @@ def _find_panopto_in_pages(course) -> list[dict]:
                     PANOPTO_HOST = m.group(1)
                     tqdm.write(f"  [info] Auto-detected PANOPTO_HOST from page: {PANOPTO_HOST}")
                     try:
-                        cfg = json.load(open(_config_file)) if _config_file.exists() else {}
+                        cfg = json.load(open(_config_file, encoding="utf-8")) if _config_file.exists() else {}
                         cfg["PANOPTO_HOST"] = PANOPTO_HOST
-                        with open(_config_file, "w") as f:
+                        with open(_config_file, "w", encoding="utf-8") as f:
                             json.dump(cfg, f, indent=2)
                     except Exception:
                         pass

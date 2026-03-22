@@ -48,8 +48,13 @@ const ML_PACKAGES = [
   'pymupdf', 'python-pptx', 'python-docx', 'openai', 'anthropic',
   'google-generativeai', 'requests', 'pillow', 'httpx', 'playwright',
   'canvasapi', 'ffmpeg-progress-yield', 'pycryptodomex',
-  'git+https://github.com/Panopto-Video-DL/Panopto-Video-DL-lib.git',
+  // yarl installed separately (modern wheel) before PanoptoDownloader
+  'yarl',
 ];
+// PanoptoDownloader requires yarl~=1.7.2 in its metadata, but works fine with
+// modern yarl at runtime.  Installing with --no-deps avoids the C++ build for
+// the old yarl on Windows where no pre-built wheel exists for Python 3.12+.
+const PANOPTO_PKG = 'git+https://github.com/Panopto-Video-DL/Panopto-Video-DL-lib.git';
 
 // ── Config helpers ────────────────────────────────────────────────────────────
 function ensureDataDir() {
@@ -496,15 +501,39 @@ async function runInstaller(basePython, sendLog, sendDone) {
   const torchArgs = idxUrl
     ? ['install', 'torch', '--index-url', idxUrl]
     : ['install', 'torch'];
-  await runStep(pip, torchArgs);
+  const torchCode = await runStep(pip, torchArgs);
+  if (torchCode !== 0) {
+    sendLog('ERROR: torch installation failed (see log above).\n');
+    sendDone({ success: false, error: 'torch install failed' });
+    return;
+  }
 
   // Step 4 — install ML packages
   sendLog('► Installing ML packages…\n');
-  await runStep(pip, ['install', ...ML_PACKAGES]);
+  const mlCode = await runStep(pip, ['install', ...ML_PACKAGES]);
+  if (mlCode !== 0) {
+    sendLog('ERROR: ML packages installation failed (see log above).\n');
+    sendDone({ success: false, error: 'ML packages install failed' });
+    return;
+  }
+
+  // Step 4b — install PanoptoDownloader without deps (avoids yarl~=1.7.2 C++ build on Windows)
+  sendLog('► Installing PanoptoDownloader (--no-deps)…\n');
+  const panoptoCode = await runStep(pip, ['install', '--no-deps', PANOPTO_PKG]);
+  if (panoptoCode !== 0) {
+    sendLog('ERROR: PanoptoDownloader installation failed (see log above).\n');
+    sendDone({ success: false, error: 'PanoptoDownloader install failed' });
+    return;
+  }
 
   // Step 5 — playwright browsers
   sendLog('► Installing Playwright browsers…\n');
-  await runStep(VENV_PYTHON, ['-m', 'playwright', 'install', 'chromium']);
+  const playwrightCode = await runStep(VENV_PYTHON, ['-m', 'playwright', 'install', 'chromium']);
+  if (playwrightCode !== 0) {
+    sendLog('WARNING: Playwright browser install failed — video download may not work.\n');
+    sendLog('  You can retry from Settings → ML Environment.\n');
+    // Non-fatal: other features still work without playwright
+  }
 
   sendLog('\n✓ ML environment ready. You can now run the pipeline.\n');
   sendDone({ success: true });
