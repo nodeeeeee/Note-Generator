@@ -14,6 +14,8 @@ Usage:
   python extract_caption.py --video PATH # process a single video file
 """
 
+from __future__ import annotations
+
 import gc
 import json
 import os

@@ -60,7 +60,7 @@ const ML_PACKAGES = [
 //   • On Linux AppImage: avoids system git, which fails when the AppImage's
 //     bundled libssl.so.3 pollutes LD_LIBRARY_PATH and breaks libcurl
 // pip downloads the zip using its own HTTP client (Python ssl), not libcurl.
-const PANOPTO_PKG = 'https://github.com/Panopto-Video-DL/Panopto-Video-DL-lib/archive/refs/heads/main.zip';
+const PANOPTO_PKG = 'https://github.com/Panopto-Video-DL/Panopto-Video-DL-lib/archive/refs/tags/v1.4.3.zip';
 
 // ── Config helpers ────────────────────────────────────────────────────────────
 function ensureDataDir() {
@@ -340,11 +340,15 @@ function detectCuda() {
 
 function torchIndexUrl(cuda) {
   if (!cuda) return null;
-  const v = cuda[0] * 10 + cuda[1];
+  const [major, minor] = cuda;
+  const v = major * 10 + minor;
   if (v >= 128) return 'https://download.pytorch.org/whl/cu128';
   if (v >= 126) return 'https://download.pytorch.org/whl/cu126';
   if (v >= 124) return 'https://download.pytorch.org/whl/cu124';
-  return 'https://download.pytorch.org/whl/cu121';
+  if (v >= 121) return 'https://download.pytorch.org/whl/cu121';
+  if (v >= 118) return 'https://download.pytorch.org/whl/cu118';
+  // CUDA < 11.8: too old for torch 2.x; fall back to CPU build
+  return null;
 }
 
 // ── Active process state ──────────────────────────────────────────────────────
@@ -513,15 +517,22 @@ async function runInstaller(basePython, sendLog, sendDone) {
   // Step 3 — detect CUDA and install torch
   const cuda   = detectCuda();
   const idxUrl = torchIndexUrl(cuda);
-  if (cuda) {
+  if (cuda && idxUrl) {
     sendLog(`► CUDA ${cuda[0]}.${cuda[1]} detected — installing torch (GPU)…\n`);
+  } else if (cuda) {
+    sendLog(`► CUDA ${cuda[0]}.${cuda[1]} detected but too old for GPU torch — installing CPU build…\n`);
   } else {
     sendLog('► No GPU detected — installing torch (CPU)…\n');
   }
   const torchArgs = idxUrl
     ? ['install', 'torch', '--index-url', idxUrl]
     : ['install', 'torch'];
-  const torchCode = await runStep(pip, torchArgs);
+  let torchCode = await runStep(pip, torchArgs);
+  if (torchCode !== 0 && idxUrl) {
+    // GPU wheel failed (e.g. incompatible GLIBC) — retry with plain CPU build
+    sendLog('WARNING: GPU torch install failed — retrying with CPU-only build…\n');
+    torchCode = await runStep(pip, ['install', 'torch']);
+  }
   if (torchCode !== 0) {
     sendLog('ERROR: torch installation failed (see log above).\n');
     sendDone({ success: false, error: 'torch install failed' });
