@@ -54,7 +54,13 @@ const ML_PACKAGES = [
 // PanoptoDownloader requires yarl~=1.7.2 in its metadata, but works fine with
 // modern yarl at runtime.  Installing with --no-deps avoids the C++ build for
 // the old yarl on Windows where no pre-built wheel exists for Python 3.12+.
-const PANOPTO_PKG = 'git+https://github.com/Panopto-Video-DL/Panopto-Video-DL-lib.git';
+//
+// Use the zip archive URL instead of git+https://, because:
+//   • On Windows: avoids triggering a git.exe subprocess (no PATH issues)
+//   • On Linux AppImage: avoids system git, which fails when the AppImage's
+//     bundled libssl.so.3 pollutes LD_LIBRARY_PATH and breaks libcurl
+// pip downloads the zip using its own HTTP client (Python ssl), not libcurl.
+const PANOPTO_PKG = 'https://github.com/Panopto-Video-DL/Panopto-Video-DL-lib/archive/refs/heads/main.zip';
 
 // ── Config helpers ────────────────────────────────────────────────────────────
 function ensureDataDir() {
@@ -436,10 +442,24 @@ function stopProcess() {
 async function runInstaller(basePython, sendLog, sendDone) {
   const venvDir = path.join(DATA_DIR, 'venv');
 
+  // Build a clean environment for installer subprocesses.
+  // On Linux AppImage, LD_LIBRARY_PATH is prepended with the AppImage's bundled
+  // libs (e.g. libssl.so.3). System tools like git use system libcurl which then
+  // finds the wrong libssl → OPENSSL version mismatch. Restore original value.
+  const installerEnv = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
+  if (process.platform === 'linux' && process.env.APPIMAGE) {
+    const orig = process.env.APPIMAGE_ORIG_LD_LIBRARY_PATH;
+    if (orig !== undefined) {
+      installerEnv.LD_LIBRARY_PATH = orig;
+    } else {
+      delete installerEnv.LD_LIBRARY_PATH;
+    }
+  }
+
   const runStep = (cmd, args) => new Promise((resolve) => {
     const proc = spawn(cmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+      env: installerEnv,
       windowsHide: true,
     });
     installProc = proc;
