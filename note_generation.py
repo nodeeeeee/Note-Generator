@@ -103,7 +103,8 @@ system="""\
 8. 图片插入规则（严格遵守）：
    - 每隔 2–3 个概念段落插入一张与内容直接相关的幻灯片图片。
    - 图片紧跟其所描述概念的最后一句之后，不得孤立出现在段落开头或结尾处。
-   - 格式：`![Slide N](images/LXX/slide_NNN.png)`（LXX 由调用方提供，禁止自行修改）。
+   - 格式：`![Slide N](images/LXX/slide_NNN.png) *(用一句话描述该图/图表在此处的含义)*`
+     （LXX 由调用方提供，禁止自行修改；括号注释必须用星号包裹，格式严格如上）。
    - 纯文字定义幻灯片（无图表/代码/公式）可跳过。
 9. 绝对禁止捏造原始材料中不存在的技术细节。
 """,
@@ -126,6 +127,7 @@ chunk="""\
 - 详细度：{detail}/10。{detail_instruction}
 - 图片插入：每隔 2–3 个段落插入一张相关幻灯片图片，紧跟该概念说明之后。
   路径必须完全照抄上方「可用图片」列表中给出的路径（含 images/L** 子目录），禁止自造路径。
+  每张图片后加一句斜体括号说明，描述该图在此处的含义：`![Slide N](path) *(说明)*`
 - 代码示例写完整可编译片段（含必要 include/imports），用正确的语言标签（```c, ```cpp, ```python）。
 - 只写本片段内容，不要引入其他讲座的内容
 """,
@@ -146,6 +148,7 @@ slide_only="""\
 - 详细度：{detail}/10。{detail_instruction}
 - 图片插入：每隔 2–3 个段落插入一张相关幻灯片图片，紧跟该概念说明之后。
   路径必须完全照抄上方「可用图片」列表中给出的路径（含 images/L** 子目录），禁止自造路径。
+  每张图片后加一句斜体括号说明，描述该图在此处的含义：`![Slide N](path) *(说明)*`
 - 代码示例写完整可编译片段，用正确的语言标签（```c, ```cpp, ```python）。
 """,
 verify="""\
@@ -201,7 +204,8 @@ Writing guidelines:
 8. Image insertion rules (strictly follow):
    - Insert one slide image every 2–3 concept paragraphs, directly relevant to the surrounding content.
    - Place the image immediately after the last sentence of the concept it illustrates — never isolated at the start or end of a section.
-   - Format: `![Slide N](images/LXX/slide_NNN.png)` (LXX is provided by the caller — do not modify it).
+   - Format: `![Slide N](images/LXX/slide_NNN.png) *(one-sentence description of what this diagram/figure shows in context)*`
+     (LXX is provided by the caller — do not modify it; the caption must be in parentheses wrapped in asterisks exactly as shown).
    - Skip purely text-definition slides (no diagrams/code/formulas).
 9. Never fabricate technical details not present in the source material.
 """,
@@ -222,7 +226,7 @@ Write study notes for the following course segment ({course_name} Lecture {lec_n
 Requirements:
 - The section heading for this segment is `### {lec_num}.{chunk_idx} {chunk_title}` (**do not output this line** — it is added by the caller).
 - Detail level: {detail}/10. {detail_instruction}
-- Images: insert one related slide image every 2–3 paragraphs, immediately after the concept it illustrates. Copy the exact path from the "Available images" list above (including the images/L** subdirectory). Do not invent paths.
+- Images: insert one related slide image every 2–3 paragraphs, immediately after the concept it illustrates. Copy the exact path from the "Available images" list above (including the images/L** subdirectory). Do not invent paths. After each image, add a one-sentence italic caption in parentheses describing what the diagram/figure shows in context: `![Slide N](path) *(caption)*`
 - Code examples must be complete and compilable (with necessary includes/imports), using the correct language tag (```c, ```cpp, ```python).
 - Only cover the content in this segment; do not introduce material from other lectures.
 """,
@@ -241,7 +245,7 @@ Write study notes for {course_name} Lecture {lec_num}: {lec_title} based on the 
 Requirements:
 - The section heading is `### {lec_num}.{chunk_idx} {chunk_title}` (**do not output this line**).
 - Detail level: {detail}/10. {detail_instruction}
-- Images: insert one related slide image every 2–3 paragraphs, immediately after the concept it illustrates. Copy the exact path from the "Available images" list (including the images/L** subdirectory). Do not invent paths.
+- Images: insert one related slide image every 2–3 paragraphs, immediately after the concept it illustrates. Copy the exact path from the "Available images" list (including the images/L** subdirectory). Do not invent paths. After each image, add a one-sentence italic caption in parentheses describing what the diagram/figure shows in context: `![Slide N](path) *(caption)*`
 - Code examples must be complete and compilable, using the correct language tag (```c, ```cpp, ```python).
 """,
 verify="""\
@@ -321,8 +325,12 @@ def _desc_has_visual(desc: str) -> bool:
 
 
 def _img_ref_pattern() -> re.Pattern:
-    # Matches both images/L04/slide_001.png (single file) and images/L04_F02/slide_001.png (multi-file)
-    return re.compile(r"!\[Slide \d+\]\((images/L\d{2}(?:_F\d{2})?/slide_\d{3}\.png)\)")
+    # Matches both images/L04/slide_001.png and images/L04_F02/slide_001.png,
+    # with an optional trailing italic caption: *(description)*
+    return re.compile(
+        r"!\[Slide \d+\]\((images/L\d{2}(?:_F\d{2})?/slide_\d{3}\.png)\)"
+        r"(?:\s*\*\([^)]*\)\*)?"
+    )
 
 
 def _vision_keep(img_path: Path, slide_text: str = "") -> bool:
