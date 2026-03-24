@@ -622,9 +622,11 @@ function buildGenerate() {
           <input id="gen-course-name" class="input-text" type="text">
         </div>
         <div class="field" style="margin-top:8px">
-          <label class="label">Lecture filter</label>
-          <input id="gen-lec-filter" class="input-text" type="text"
-            placeholder="e.g. 1-5  or  1,3,5  (blank=all)">
+          <label class="label">Lecture</label>
+          <select id="gen-lec-select" class="select-ctrl">
+            <option value="">All lectures</option>
+          </select>
+          <div id="gen-lec-status" style="font-size:11px;color:var(--c-white-45);margin-top:4px;min-height:14px"></div>
         </div>
       `, 'col expand')}
       ${mkCard(`
@@ -649,6 +651,45 @@ function buildGenerate() {
       <button class="btn-primary" id="gen-run-btn">✦ Generate Notes</button>
     </div>
   `;
+}
+
+// Populate the lecture dropdown for a given course id
+async function loadLectureDropdown(cid) {
+  const sel    = document.getElementById('gen-lec-select');
+  const status = document.getElementById('gen-lec-status');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Loading…</option>';
+  sel.disabled = true;
+  if (status) status.textContent = '';
+
+  const lecs = await window.api.listLectures(cid);
+  sel.disabled = false;
+
+  if (!lecs || lecs.length === 0) {
+    sel.innerHTML = '<option value="">All lectures (no slides found)</option>';
+    if (status) status.textContent = 'No slide files found under materials/';
+    return;
+  }
+
+  // Only show lectures with extracted numbers; tutorials/midterms etc. have no number
+  const numbered = lecs.filter(l => l.num != null);
+  let opts = `<option value="">All lectures (${numbered.length})</option>`;
+  for (const l of numbered) {
+    opts += `<option value="${l.num}">L${l.num}: ${l.title}</option>`;
+  }
+  sel.innerHTML = opts;
+
+  const numbered   = lecs.filter(l => l.num != null);
+  const alignCount = lecs[0]?.alignCount ?? 0;
+  const alignHint  = alignCount > 0 ? `  ·  ${alignCount} alignment file(s) ready` : '  ·  no alignment files yet';
+  if (status) status.textContent = `${numbered.length} lecture(s) found${alignHint}`;
+
+  // Update run button label when selection changes
+  sel.addEventListener('change', () => {
+    const btn = document.getElementById('gen-run-btn');
+    if (!btn) return;
+    btn.textContent = sel.value ? `✦ Generate Notes for L${sel.value}` : '✦ Generate Notes';
+  });
 }
 
 async function fillGenInfo() {
@@ -1192,36 +1233,45 @@ async function attachPageHandlers() {
     const detLabel  = document.getElementById('gen-detail-val');
     detSlider?.addEventListener('input', () => { detLabel.textContent = detSlider.value; });
 
-    // Auto-fill course name when course changes
-    document.getElementById('gen-course')?.addEventListener('change', (e) => {
+    // Auto-fill course name + reload lecture list when course changes
+    const genCourseEl = document.getElementById('gen-course');
+    genCourseEl?.addEventListener('change', (e) => {
       const nameEl = document.getElementById('gen-course-name');
       if (nameEl) nameEl.value = courseNameFromId(e.target.value);
+      loadLectureDropdown(e.target.value);
     });
 
-    // Pre-fill course name for default course
-    const firstCid = document.getElementById('gen-course')?.value;
+    // Pre-fill course name and load lectures for default course
+    const firstCid = genCourseEl?.value;
     if (firstCid) {
       const nameEl = document.getElementById('gen-course-name');
       if (nameEl && !nameEl.value) nameEl.value = courseNameFromId(firstCid);
+      loadLectureDropdown(firstCid);
     }
 
     document.getElementById('gen-run-btn')?.addEventListener('click', async () => {
       const cid    = document.getElementById('gen-course')?.value;
       if (!cid) { snack('Select a course first.', false); return; }
-      const python = await window.api.getPythonPath();
-      const paths  = await window.api.getScriptsPaths();
-      const name   = document.getElementById('gen-course-name')?.value.trim() || courseNameFromId(cid);
-      const detail = document.getElementById('gen-detail')?.value || '7';
-      const lf     = document.getElementById('gen-lec-filter')?.value.trim();
-      const force  = document.getElementById('gen-force')?.checked;
-      const merge  = document.getElementById('gen-merge')?.checked;
-      const iter   = document.getElementById('gen-iterate')?.checked;
+
+      const python  = await window.api.getPythonPath();
+      const paths   = await window.api.getScriptsPaths();
+      const name    = document.getElementById('gen-course-name')?.value.trim() || courseNameFromId(cid);
+      const detail  = document.getElementById('gen-detail')?.value || '7';
+      const force   = document.getElementById('gen-force')?.checked;
+      const merge   = document.getElementById('gen-merge')?.checked;
+      const iter    = document.getElementById('gen-iterate')?.checked;
+      const lecNum  = document.getElementById('gen-lec-select')?.value;   // '' = all
+
       const cmd = [python, paths.generate, '--course', cid, '--course-name', name, '--detail', detail];
-      if (lf)    cmd.push('--lectures', lf);
-      if (force) cmd.push('--force');
-      if (merge) cmd.push('--merge-only');
-      if (iter)  cmd.push('--iterate');
-      runCmd(cmd, `note_generation.py --course ${cid}`);
+      if (lecNum) cmd.push('--lectures', lecNum);
+      if (force)  cmd.push('--force');
+      if (merge)  cmd.push('--merge-only');
+      if (iter)   cmd.push('--iterate');
+
+      const label = lecNum
+        ? `note_generation.py  L${lecNum} of course ${cid}`
+        : `note_generation.py --course ${cid}`;
+      runCmd(cmd, label);
     });
     return;
   }

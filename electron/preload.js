@@ -48,6 +48,9 @@ contextBridge.exposeInMainWorld('api', {
   // ── Script paths ──────────────────────────────────────────────────────────
   getScriptsPaths: ()    => ipcRenderer.invoke('scripts:paths'),
 
+  // ── Course helpers ────────────────────────────────────────────────────────
+  listLectures:   (cid)  => ipcRenderer.invoke('course:listLectures', cid),
+
   // ── OS/Dialog helpers ─────────────────────────────────────────────────────
   openDirDialog:  ()     => ipcRenderer.invoke('dialog:openDir'),
   getOutputDir:   ()     => ipcRenderer.invoke('path:outputDir'),

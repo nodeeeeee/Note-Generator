@@ -561,6 +561,71 @@ async function runInstaller(basePython, sendLog, sendDone) {
   sendDone({ success: true });
 }
 
+// ── Lecture discovery (for Generate page dropdown) ───────────────────────────
+const SLIDE_EXTS = new Set(['.pptx', '.pdf', '.docx', '.ppt']);
+
+function extractLecNum(stem) {
+  // L01, L1, L_01, L-01 — must be at start or after a non-letter
+  let m = stem.match(/(?:^|[^a-zA-Z])L[_-]?0*(\d+)/i);
+  if (m) return parseInt(m[1]);
+  // "Lecture 1", "Lecture_2", "Lec 3", "lec_02"
+  m = stem.match(/Lec(?:ture)?[_\s-]?0*(\d+)/i);
+  if (m) return parseInt(m[1]);
+  // leading digits: "05_Scheduling"
+  m = stem.match(/^0*(\d+)/);
+  if (m) return parseInt(m[1]);
+  return null;
+}
+
+function walkDir(dir, exts, results = []) {
+  if (!fs.existsSync(dir)) return results;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) walkDir(full, exts, results);
+    else if (exts.has(path.extname(e.name).toLowerCase())) results.push(full);
+  }
+  return results;
+}
+
+function discoverLectures(courseId) {
+  const courseDir    = path.join(getOutputDir(), String(courseId));
+  const materialsDir = path.join(courseDir, 'materials');
+  const alignDir     = path.join(courseDir, 'alignment');
+
+  // Count alignment files so we can show a hint in the dropdown
+  let alignCount = 0;
+  if (fs.existsSync(alignDir)) {
+    alignCount = fs.readdirSync(alignDir)
+      .filter(f => f.endsWith('.json') && !f.endsWith('.compact.json') && !f.endsWith('.image_cache.json'))
+      .length;
+  }
+
+  // Collect slide files recursively, deduplicate by lecture number
+  const allFiles = walkDir(materialsDir, SLIDE_EXTS);
+  const byNum = new Map();   // num → {num, title, file}
+  const noNum = [];
+
+  for (const file of allFiles) {
+    const stem  = path.basename(file, path.extname(file));
+    const num   = extractLecNum(stem);
+    const title = stem.replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (num != null) {
+      // Keep the file from the most prominent subdirectory (first found wins)
+      if (!byNum.has(num)) byNum.set(num, { num, title, file });
+    } else {
+      noNum.push({ num: null, title, file });
+    }
+  }
+
+  const slides = [
+    ...[...byNum.values()].sort((a, b) => a.num - b.num),
+    ...noNum.sort((a, b) => a.title.localeCompare(b.title)),
+  ];
+
+  // Attach whether alignment files exist (Python does the exact matching)
+  return slides.map(sl => ({ ...sl, alignCount }));
+}
+
 // ── Uninstall helpers ─────────────────────────────────────────────────────────
 function getDirSizeMB(dirPath, excludeDirs = []) {
   let bytes = 0;
@@ -637,9 +702,10 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('scripts:paths',   ()       => SCRIPTS);
-  ipcMain.handle('path:outputDir',  ()       => getOutputDir());
-  ipcMain.handle('path:dataDir',    ()       => DATA_DIR);
+  ipcMain.handle('scripts:paths',       ()       => SCRIPTS);
+  ipcMain.handle('path:outputDir',      ()       => getOutputDir());
+  ipcMain.handle('path:dataDir',        ()       => DATA_DIR);
+  ipcMain.handle('course:listLectures', (_, cid) => discoverLectures(cid));
 
   // ── Uninstaller ──────────────────────────────────────────────────────────
   ipcMain.handle('uninstall:sizes', async () => {
