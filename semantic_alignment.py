@@ -400,13 +400,13 @@ def get_embedder():
 
 def embed_texts(model, texts: list[str], desc: str = "  embedding") -> np.ndarray:
     """Return L2-normalised float32 embeddings, shape (N, D)."""
+    print(f"{desc} ({len(texts)} texts)…", flush=True)
     vecs = model.encode(
         texts,
         batch_size=BATCH_SIZE,
         show_progress_bar=True,
         normalize_embeddings=True,   # cosine sim → inner product on unit sphere
         convert_to_numpy=True,
-        tqdm_kwargs={"desc": desc, "unit": "text", "leave": False},
     )
     return vecs.astype(np.float32)
 
