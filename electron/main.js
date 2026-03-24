@@ -561,6 +561,41 @@ async function runInstaller(basePython, sendLog, sendDone) {
   sendDone({ success: true });
 }
 
+// ── Uninstall helpers ─────────────────────────────────────────────────────────
+function getDirSizeMB(dirPath, excludeDirs = []) {
+  let bytes = 0;
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const e of entries) {
+      if (excludeDirs.includes(e.name)) continue;
+      const full = path.join(dirPath, e.name);
+      if (e.isDirectory()) {
+        bytes += getDirSizeBytes(full);
+      } else {
+        try { bytes += fs.statSync(full).size; } catch {}
+      }
+    }
+  } catch {}
+  return Math.round(bytes / (1024 * 1024));
+}
+
+function getDirSizeBytes(dirPath) {
+  let bytes = 0;
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const e of entries) {
+      const full = path.join(dirPath, e.name);
+      if (e.isDirectory()) bytes += getDirSizeBytes(full);
+      else try { bytes += fs.statSync(full).size; } catch {}
+    }
+  } catch {}
+  return bytes;
+}
+
+function rmRecursive(dirPath) {
+  fs.rmSync(dirPath, { recursive: true, force: true });
+}
+
 // ── IPC handlers ──────────────────────────────────────────────────────────────
 function registerIpc() {
   ipcMain.handle('config:get',      ()       => loadConfig());
@@ -605,6 +640,41 @@ function registerIpc() {
   ipcMain.handle('scripts:paths',   ()       => SCRIPTS);
   ipcMain.handle('path:outputDir',  ()       => getOutputDir());
   ipcMain.handle('path:dataDir',    ()       => DATA_DIR);
+
+  // ── Uninstaller ──────────────────────────────────────────────────────────
+  ipcMain.handle('uninstall:sizes', async () => {
+    const venvDir    = path.join(DATA_DIR, 'venv');
+    const outputDir  = getOutputDir();
+    return {
+      venv:    getDirSizeMB(venvDir),
+      data:    getDirSizeMB(DATA_DIR, ['venv']),   // config/scripts/manifest, excl venv
+      content: outputDir !== DATA_DIR ? getDirSizeMB(outputDir) : null,
+      outputDir,
+    };
+  });
+
+  ipcMain.handle('uninstall:run', async (_, { keepContent }) => {
+    try {
+      // 1. Delete ML venv
+      const venvDir = path.join(DATA_DIR, 'venv');
+      if (fs.existsSync(venvDir)) rmRecursive(venvDir);
+
+      // 2. Optionally delete generated content (OUTPUT_DIR if separate from DATA_DIR)
+      if (!keepContent) {
+        const outputDir = getOutputDir();
+        if (outputDir && outputDir !== DATA_DIR && fs.existsSync(outputDir)) {
+          rmRecursive(outputDir);
+        }
+      }
+
+      // 3. Delete the rest of DATA_DIR (config, scripts, manifest, api keys…)
+      if (fs.existsSync(DATA_DIR)) rmRecursive(DATA_DIR);
+
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 
   ipcMain.handle('dialog:openDir', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {

@@ -678,6 +678,29 @@ function buildSettings() {
       <button class="btn-secondary" id="settings-refresh-btn">${I.refresh} Refresh Courses</button>
       <span id="settings-refresh-status" style="font-size:11px;color:var(--c-white-60)"></span>
     </div>
+    ${buildUninstallSection()}
+  `;
+}
+
+function buildUninstallSection() {
+  return `
+    <div style="margin-top:24px;padding:16px;border:1px solid var(--c-red,#e53935);border-radius:8px;background:rgba(229,57,53,0.06)">
+      <div style="font-weight:600;font-size:14px;color:var(--c-red,#e53935);margin-bottom:6px">Danger Zone — Uninstall AutoNote</div>
+      <div style="font-size:12px;color:var(--c-white-60);margin-bottom:12px">
+        Permanently removes the ML environment and all app settings.
+        The app binary itself must be deleted separately after uninstalling.
+      </div>
+      <div id="uninstall-sizes" style="font-size:12px;color:var(--c-white-60);margin-bottom:12px;line-height:1.8">
+        Calculating sizes…
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px;cursor:pointer">
+        <input type="checkbox" id="uninstall-keep-content" checked>
+        Keep generated content (notes, captions, alignment, videos, materials)
+      </label>
+      <button id="btn-uninstall" style="background:var(--c-red,#e53935);color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600">
+        Uninstall AutoNote
+      </button>
+    </div>
   `;
 }
 
@@ -1214,6 +1237,62 @@ async function attachPageHandlers() {
 
     document.getElementById('settings-refresh-btn')?.addEventListener('click', () => {
       refreshCourses(true);
+    });
+
+    // Uninstall sizes
+    (async () => {
+      const el = document.getElementById('uninstall-sizes');
+      if (!el) return;
+      try {
+        const s = await window.api.getUninstallSizes();
+        const fmt = mb => mb >= 1024 ? `${(mb/1024).toFixed(1)} GB` : `${mb} MB`;
+        let html = `<b>Will be deleted:</b><br>`;
+        html += `&nbsp;&nbsp;• ML Environment: <b>${fmt(s.venv)}</b><br>`;
+        html += `&nbsp;&nbsp;• App settings &amp; config: <b>${fmt(s.data)}</b><br>`;
+        if (s.content !== null) {
+          html += `<br><b>Generated content</b> (kept unless unchecked):<br>`;
+          html += `&nbsp;&nbsp;• Output directory (${s.outputDir}): <b>${fmt(s.content)}</b>`;
+        } else {
+          html += `<br><span style="color:var(--c-white-45)">Generated content is inside the app data dir and will be removed with it.</span>`;
+        }
+        el.innerHTML = html;
+      } catch { el.textContent = 'Could not calculate sizes.'; }
+    })();
+
+    // Uninstall button
+    document.getElementById('btn-uninstall')?.addEventListener('click', async () => {
+      const keepContent = document.getElementById('uninstall-keep-content')?.checked ?? true;
+      const contentLine = keepContent
+        ? 'Generated notes, captions, and videos will be kept.'
+        : 'Generated notes, captions, and videos will also be DELETED.';
+      const confirmed = confirm(
+        `Are you sure you want to uninstall AutoNote?\n\n` +
+        `This will delete:\n` +
+        `  • The ML environment (~/.auto_note/venv)\n` +
+        `  • All app settings and credentials\n\n` +
+        `${contentLine}\n\n` +
+        `After uninstalling, please delete the AutoNote app binary/installer manually.`
+      );
+      if (!confirmed) return;
+
+      const btn = document.getElementById('btn-uninstall');
+      btn.disabled = true;
+      btn.textContent = 'Uninstalling…';
+
+      const result = await window.api.runUninstall(keepContent);
+      if (result.ok) {
+        alert(
+          'AutoNote data has been removed.\n\n' +
+          (process.platform === 'win32'
+            ? 'To finish uninstalling, go to Windows Settings → Apps → AutoNote → Uninstall.'
+            : 'To finish uninstalling, delete the AutoNote AppImage file.')
+        );
+        window.close();
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Uninstall AutoNote';
+        alert(`Uninstall failed: ${result.error}`);
+      }
     });
 
     // Venv install / reinstall
