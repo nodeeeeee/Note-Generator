@@ -115,6 +115,9 @@ function loadCredentials() {
     openai:    read('openai_api.txt'),
     anthropic: read('anthropic_key.txt'),
     gemini:    read('gemini_api.txt'),
+    deepseek:  read('deepseek_key.txt'),
+    grok:      read('grok_key.txt'),
+    mistral:   read('mistral_key.txt'),
   };
 }
 
@@ -125,6 +128,9 @@ function saveCredentials(data) {
     openai:    'openai_api.txt',
     anthropic: 'anthropic_key.txt',
     gemini:    'gemini_api.txt',
+    deepseek:  'deepseek_key.txt',
+    grok:      'grok_key.txt',
+    mistral:   'mistral_key.txt',
   };
   for (const [key, file] of Object.entries(map)) {
     if (data[key] !== undefined && data[key].trim()) {

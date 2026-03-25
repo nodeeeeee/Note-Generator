@@ -814,19 +814,39 @@ const CONSTANTS_DEF = [
     ['English','en'],['Chinese (中文)','zh'],
   ]],
   ['generate', 'NOTE_MODEL', 'Note generation LLM', 'gpt-5.1', [
-    ['gpt-5.1','gpt-5.1'],['gpt-5.2','gpt-5.2'],['gpt-4.1','gpt-4.1'],['gpt-4.1-mini','gpt-4.1-mini'],
-    ['o3','o3'],['o1','o1'],
-    ['Gemini 2.5 Pro','gemini-2.5-pro'],['Gemini 2.5 Flash','gemini-2.5-flash'],
-    ['Gemini 2.0 Flash','gemini-2.0-flash'],['Gemini 1.5 Pro','gemini-1.5-pro'],
+    // ── OpenAI ──────────────────────────────────────────────────────────
+    ['GPT-5.1 ★','gpt-5.1'],['GPT-5.2','gpt-5.2'],
+    ['GPT-4.1','gpt-4.1'],['GPT-4.1 mini','gpt-4.1-mini'],['GPT-4.1 nano','gpt-4.1-nano'],
+    ['o3 (reasoning)','o3'],['o4-mini (reasoning)','o4-mini'],['o3-mini','o3-mini'],
+    // ── Anthropic ───────────────────────────────────────────────────────
     ['Claude Opus 4.6','claude-opus-4-6'],['Claude Sonnet 4.6','claude-sonnet-4-6'],
-    ['Claude Sonnet 4.5','claude-sonnet-4-5'],['Claude Sonnet 3.5','claude-3-5-sonnet-20241022'],
-    ['Claude Haiku 4.5','claude-haiku-4-5-20251001'],
+    ['Claude Sonnet 4.5','claude-sonnet-4-5'],['Claude Haiku 4.5','claude-haiku-4-5-20251001'],
+    ['Claude Sonnet 3.5','claude-3-5-sonnet-20241022'],['Claude Haiku 3.5','claude-3-5-haiku-20241022'],
+    // ── Google Gemini ───────────────────────────────────────────────────
+    ['Gemini 2.5 Pro','gemini-2.5-pro'],['Gemini 2.5 Flash','gemini-2.5-flash'],
+    ['Gemini 2.5 Flash Lite','gemini-2.5-flash-lite'],['Gemini 2.0 Flash','gemini-2.0-flash'],
+    // ── DeepSeek ────────────────────────────────────────────────────────
+    ['DeepSeek V3 (chat)','deepseek-chat'],['DeepSeek R1 (reasoning)','deepseek-reasoner'],
+    // ── xAI Grok ────────────────────────────────────────────────────────
+    ['Grok 3','grok-3'],['Grok 3 mini','grok-3-mini'],
+    // ── Mistral ─────────────────────────────────────────────────────────
+    ['Mistral Large','mistral-large-latest'],['Mistral Medium','mistral-medium-latest'],
+    ['Mistral Small','mistral-small-latest'],['Codestral','codestral-latest'],
   ]],
   ['generate', 'VERIFY_MODEL', 'Verification LLM', 'gpt-4.1-mini', [
-    ['gpt-4.1-mini','gpt-4.1-mini'],['gpt-4.1','gpt-4.1'],['gpt-5.1','gpt-5.1'],
-    ['Gemini 2.5 Flash','gemini-2.5-flash'],['Gemini 2.0 Flash','gemini-2.0-flash'],
-    ['Claude Haiku 4.5','claude-haiku-4-5-20251001'],
-    ['Claude Sonnet 3.5','claude-3-5-sonnet-20241022'],['Claude Sonnet 4.5','claude-sonnet-4-5'],
+    // ── OpenAI ──────────────────────────────────────────────────────────
+    ['GPT-4.1 mini ★','gpt-4.1-mini'],['GPT-4.1 nano','gpt-4.1-nano'],
+    ['GPT-4.1','gpt-4.1'],['GPT-5.1','gpt-5.1'],['o4-mini (reasoning)','o4-mini'],
+    // ── Anthropic ───────────────────────────────────────────────────────
+    ['Claude Haiku 4.5','claude-haiku-4-5-20251001'],['Claude Haiku 3.5','claude-3-5-haiku-20241022'],
+    ['Claude Sonnet 4.6','claude-sonnet-4-6'],['Claude Sonnet 3.5','claude-3-5-sonnet-20241022'],
+    // ── Google Gemini ───────────────────────────────────────────────────
+    ['Gemini 2.5 Flash','gemini-2.5-flash'],['Gemini 2.5 Flash Lite','gemini-2.5-flash-lite'],
+    ['Gemini 2.0 Flash','gemini-2.0-flash'],
+    // ── DeepSeek ────────────────────────────────────────────────────────
+    ['DeepSeek V3 (chat)','deepseek-chat'],
+    // ── xAI / Mistral ───────────────────────────────────────────────────
+    ['Grok 3 mini','grok-3-mini'],['Mistral Small','mistral-small-latest'],
   ]],
   ['generate', 'DETAIL_LEVEL',   'Default detail level',  '8',   null],
   ['generate', 'CHAPTER_SIZE',   'Slides per GPT call',   '15',  null],
@@ -952,6 +972,14 @@ async function loadSettingsData() {
       <div class="row">
         <div class="col expand"><label class="label">Gemini API Key</label>
           ${mkRevealField('cred-gemini', 'AIza…', creds.gemini)}</div>
+        <div class="col expand"><label class="label">DeepSeek API Key</label>
+          ${mkRevealField('cred-deepseek', 'sk-…', creds.deepseek)}</div>
+      </div>
+      <div class="row">
+        <div class="col expand"><label class="label">xAI (Grok) API Key</label>
+          ${mkRevealField('cred-grok', 'xai-…', creds.grok)}</div>
+        <div class="col expand"><label class="label">Mistral API Key</label>
+          ${mkRevealField('cred-mistral', 'key…', creds.mistral)}</div>
       </div>
     `;
   }
@@ -1020,6 +1048,9 @@ async function saveAllSettings() {
       openai:    document.getElementById('cred-openai')?.value || '',
       anthropic: document.getElementById('cred-anthropic')?.value || '',
       gemini:    document.getElementById('cred-gemini')?.value || '',
+      deepseek:  document.getElementById('cred-deepseek')?.value || '',
+      grok:      document.getElementById('cred-grok')?.value || '',
+      mistral:   document.getElementById('cred-mistral')?.value || '',
     });
   } catch (e) { errors.push('Credentials: ' + e.message); }
 

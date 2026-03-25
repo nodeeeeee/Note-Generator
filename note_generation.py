@@ -505,6 +505,12 @@ def _provider(model: str) -> str:
         return "gemini"
     if model.startswith("claude"):
         return "anthropic"
+    if model.startswith("deepseek"):
+        return "deepseek"
+    if model.startswith("grok"):
+        return "grok"
+    if model.startswith(("mistral", "codestral", "pixtral", "magistral")):
+        return "mistral"
     return "openai"
 
 
@@ -513,39 +519,46 @@ _client_cache: dict = {}
 
 def _make_client(provider: str):
     import os
-    if provider == "gemini":
-        from openai import OpenAI
-        key = os.environ.get("GEMINI_API_KEY", "")
+    from openai import OpenAI
+
+    def _read_key(env_var: str, filename: str, label: str) -> str:
+        key = os.environ.get(env_var, "")
         if not key:
-            kf = DATA_DIR / "gemini_api.txt"
+            kf = DATA_DIR / filename
             if kf.exists():
                 key = kf.read_text().strip()
         if not key:
-            raise RuntimeError("No Gemini API key found (set gemini_api.txt or GEMINI_API_KEY)")
+            raise RuntimeError(
+                f"No {label} API key found "
+                f"(set {filename} in ~/.auto_note/ or {env_var} env var)"
+            )
+        return key
+
+    if provider == "gemini":
         return OpenAI(
-            api_key=key,
+            api_key=_read_key("GEMINI_API_KEY", "gemini_api.txt", "Gemini"),
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         )
     elif provider == "anthropic":
         from anthropic import Anthropic
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not key:
-            kf = DATA_DIR / "anthropic_key.txt"
-            if kf.exists():
-                key = kf.read_text().strip()
-        if not key:
-            raise RuntimeError("No Anthropic API key found (set anthropic_key.txt or ANTHROPIC_API_KEY)")
-        return Anthropic(api_key=key)
+        return Anthropic(api_key=_read_key("ANTHROPIC_API_KEY", "anthropic_key.txt", "Anthropic"))
+    elif provider == "deepseek":
+        return OpenAI(
+            api_key=_read_key("DEEPSEEK_API_KEY", "deepseek_key.txt", "DeepSeek"),
+            base_url="https://api.deepseek.com",
+        )
+    elif provider == "grok":
+        return OpenAI(
+            api_key=_read_key("GROK_API_KEY", "grok_key.txt", "xAI Grok"),
+            base_url="https://api.x.ai/v1",
+        )
+    elif provider == "mistral":
+        return OpenAI(
+            api_key=_read_key("MISTRAL_API_KEY", "mistral_key.txt", "Mistral"),
+            base_url="https://api.mistral.ai/v1",
+        )
     else:  # openai
-        from openai import OpenAI
-        key = os.environ.get("OPENAI_API_KEY", "")
-        if not key:
-            kf = DATA_DIR / "openai_api.txt"
-            if kf.exists():
-                key = kf.read_text().strip()
-        if not key:
-            raise RuntimeError("No OpenAI API key found (set openai_api.txt or OPENAI_API_KEY)")
-        return OpenAI(api_key=key)
+        return OpenAI(api_key=_read_key("OPENAI_API_KEY", "openai_api.txt", "OpenAI"))
 
 
 def _get_client_for(model: str):
