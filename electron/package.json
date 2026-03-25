@@ -1,7 +1,12 @@
 {
   "name": "auto-note",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "AutoNote — lecture notes generator from Canvas recordings",
+  "homepage": "https://github.com/nodeeeeee/Auto-Note",
+  "author": {
+    "name": "nodeeeeee",
+    "email": "autonote@users.noreply.github.com"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
