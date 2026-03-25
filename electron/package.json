@@ -29,12 +29,23 @@
       "!test/**"
     ],
     "linux": {
-      "target": "AppImage",
-      "icon": "../assets/icon.png"
+      "target": ["AppImage", "deb"],
+      "icon": "../assets/icon.png",
+      "category": "Education",
+      "desktop": {
+        "Name": "AutoNote",
+        "Comment": "Lecture notes generator from Canvas recordings",
+        "StartupWMClass": "AutoNote"
+      }
     },
     "win": {
       "target": "nsis",
       "icon": "../assets/icon.ico"
+    },
+    "nsis": {
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AutoNote"
     },
     "mac": {
       "target": "dmg",
