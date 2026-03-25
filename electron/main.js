@@ -627,34 +627,37 @@ function discoverLectures(courseId) {
 }
 
 // ── Uninstall helpers ─────────────────────────────────────────────────────────
-function getDirSizeMB(dirPath, excludeDirs = []) {
+async function getDirSizeBytes(dirPath) {
   let bytes = 0;
   try {
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const e of entries) {
-      if (excludeDirs.includes(e.name)) continue;
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    await Promise.all(entries.map(async e => {
       const full = path.join(dirPath, e.name);
       if (e.isDirectory()) {
-        bytes += getDirSizeBytes(full);
+        bytes += await getDirSizeBytes(full);
       } else {
-        try { bytes += fs.statSync(full).size; } catch {}
+        try { bytes += (await fs.promises.stat(full)).size; } catch {}
       }
-    }
-  } catch {}
-  return Math.round(bytes / (1024 * 1024));
-}
-
-function getDirSizeBytes(dirPath) {
-  let bytes = 0;
-  try {
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const e of entries) {
-      const full = path.join(dirPath, e.name);
-      if (e.isDirectory()) bytes += getDirSizeBytes(full);
-      else try { bytes += fs.statSync(full).size; } catch {}
-    }
+    }));
   } catch {}
   return bytes;
+}
+
+async function getDirSizeMB(dirPath, excludeDirs = []) {
+  let bytes = 0;
+  try {
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    await Promise.all(entries.map(async e => {
+      if (excludeDirs.includes(e.name)) return;
+      const full = path.join(dirPath, e.name);
+      if (e.isDirectory()) {
+        bytes += await getDirSizeBytes(full);
+      } else {
+        try { bytes += (await fs.promises.stat(full)).size; } catch {}
+      }
+    }));
+  } catch {}
+  return Math.round(bytes / (1024 * 1024));
 }
 
 function rmRecursive(dirPath) {
@@ -711,12 +714,12 @@ function registerIpc() {
   ipcMain.handle('uninstall:sizes', async () => {
     const venvDir   = path.join(DATA_DIR, 'venv');
     const outputDir = getOutputDir();
-    return {
-      venv:     getDirSizeMB(venvDir),
-      settings: getDirSizeMB(DATA_DIR, ['venv']),  // config/scripts/manifest/api-keys, excl venv
-      content:  outputDir !== DATA_DIR ? getDirSizeMB(outputDir) : null,
-      outputDir,
-    };
+    const [venv, settings, content] = await Promise.all([
+      getDirSizeMB(venvDir),
+      getDirSizeMB(DATA_DIR, ['venv']),
+      outputDir !== DATA_DIR ? getDirSizeMB(outputDir) : Promise.resolve(null),
+    ]);
+    return { venv, settings, content, outputDir };
   });
 
   ipcMain.handle('uninstall:run', async (_, { keepContent, keepSettings, keepVenv }) => {
