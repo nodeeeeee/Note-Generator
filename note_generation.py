@@ -1493,14 +1493,35 @@ def _discover_lectures(course_dir: Path) -> list[LectureData]:
             if p.suffix.lower() in exts and "image_cache" not in p.name
         ])
     else:
-        # Fall back to direct children of materials/ only — never recurse into
-        # subdirectories (Tutorials/, Assignments/, Midterm/ …) to avoid
-        # treating every course PDF as a lecture slide file.
-        slide_files = sorted([
-            p for p in mat_dir.iterdir()
+        # Recursively search all of materials/ for lecture-like files.
+        # Include a file if it has a lecture number in its name OR lives
+        # in a folder whose name suggests lectures.
+        _LECTURE_FOLDER_PAT = re.compile(
+            r"lecture|slides|notes", re.IGNORECASE)
+        _LECTURE_FILE_PAT = re.compile(
+            r"(?<![a-zA-Z])[Ll](?:ec(?:ture)?)?[-_ ]?0*\d+", re.IGNORECASE)
+
+        all_candidates = sorted([
+            p for p in mat_dir.rglob("*")
             if p.is_file() and p.suffix.lower() in exts
             and "image_cache" not in p.name
         ])
+
+        slide_files = []
+        for p in all_candidates:
+            # Always include files at the root of materials/
+            if p.parent == mat_dir:
+                slide_files.append(p)
+                continue
+            # Include if filename looks like a lecture
+            if _LECTURE_FILE_PAT.search(p.stem):
+                slide_files.append(p)
+                continue
+            # Include if any parent folder name suggests lectures
+            rel_parts = p.relative_to(mat_dir).parts[:-1]  # folder names
+            if any(_LECTURE_FOLDER_PAT.search(part) for part in rel_parts):
+                slide_files.append(p)
+                continue
 
     # Group files by lecture number; files without a number get a unique high index
     from collections import defaultdict
