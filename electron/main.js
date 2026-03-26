@@ -140,10 +140,10 @@ function saveCredentials(data) {
 }
 
 // ── Canvas API ────────────────────────────────────────────────────────────────
-function httpGet(url, headers) {
+function httpGetWithHeaders(url, headers) {
   return new Promise((resolve, reject) => {
-    const mod  = url.startsWith('https') ? https : http;
-    const req  = mod.get(url, { headers }, (res) => {
+    const mod = url.startsWith('https') ? https : http;
+    const req = mod.get(url, { headers }, (res) => {
       let body = '';
       res.on('data', d => body += d);
       res.on('end', () => {
@@ -153,13 +153,30 @@ function httpGet(url, headers) {
         if (res.statusCode >= 400) {
           return reject(new Error(`HTTP ${res.statusCode}: ${url}`));
         }
-        try { resolve(JSON.parse(body)); }
-        catch { reject(new Error('Invalid JSON response from server')); }
+        try {
+          resolve({ data: JSON.parse(body), linkHeader: res.headers['link'] || '' });
+        } catch {
+          reject(new Error('Invalid JSON response from server'));
+        }
       });
     });
     req.on('error', reject);
     req.setTimeout(12000, () => { req.destroy(); reject(new Error('Request timed out')); });
   });
+}
+
+function httpGet(url, headers) {
+  return httpGetWithHeaders(url, headers).then(r => r.data);
+}
+
+// Parse the Canvas `Link` response header to find the next-page URL.
+function parseLinkNext(linkHeader) {
+  if (!linkHeader) return null;
+  for (const part of linkHeader.split(',')) {
+    const m = part.match(/<([^>]+)>.*rel="next"/);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 const SKIP_KW = [
@@ -172,15 +189,25 @@ async function fetchCoursesFromCanvas() {
   const token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : '';
   if (!token) return { error: 'Canvas token not saved — enter it in Settings → API Keys.' };
   const cfg = loadConfig();
-  let url = (cfg.CANVAS_URL || '').trim().replace(/\/$/, '');
-  if (!url) return { error: 'Canvas URL not configured — enter it in Settings → Connection.' };
-  if (!url.startsWith('http')) url = 'https://' + url;
+  let baseUrl = (cfg.CANVAS_URL || '').trim().replace(/\/$/, '');
+  if (!baseUrl) return { error: 'Canvas URL not configured — enter it in Settings → Connection.' };
+  if (!baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
   try {
-    const data = await httpGet(
-      `${url}/api/v1/courses?enrollment_state=active&per_page=100`,
-      { 'Authorization': `Bearer ${token}` },
-    );
-    const courses = data
+    // Fetch all courses the user has any enrollment in (student, TA, auditor, cross-listed…).
+    // Do NOT filter by enrollment_state=active — that drops TAs, design-experience tracks,
+    // and cross-listed courses whose enrollment state differs from "active".
+    // Follow Link headers for pagination in case the user has >100 courses.
+    const allData = [];
+    const authHeaders = { 'Authorization': `Bearer ${token}` };
+    let nextUrl = `${baseUrl}/api/v1/courses?per_page=100`;
+    let pages = 0;
+    while (nextUrl && pages < 20) {   // safety cap: 20 pages = 2000 courses max
+      const { data, linkHeader } = await httpGetWithHeaders(nextUrl, authHeaders);
+      allData.push(...(Array.isArray(data) ? data : []));
+      nextUrl = parseLinkNext(linkHeader);
+      pages++;
+    }
+    const courses = allData
       .filter(c => c.name && !SKIP_KW.some(k => c.name.toLowerCase().includes(k)))
       .map(c => ({ id: c.id, name: c.name || c.course_code || String(c.id) }));
     return { courses };

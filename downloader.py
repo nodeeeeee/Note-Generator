@@ -137,9 +137,14 @@ def _secretly_wait_dir() -> None:
 # ── Canvas course listing ──────────────────────────────────────────────────────
 
 def get_academic_courses(canvas: Canvas) -> list:
-    """Return all active academic courses."""
+    """Return all academic courses the user has any enrollment in.
+
+    Intentionally does NOT filter by enrollment_state="active" so that
+    courses with TA, auditor, design-experience, or cross-listed enrollments
+    are included — these often have an enrollment state other than "active".
+    """
     courses = []
-    for c in canvas.get_courses(enrollment_state="active"):
+    for c in canvas.get_courses():
         if _is_academic(c):
             courses.append(c)
     return courses
