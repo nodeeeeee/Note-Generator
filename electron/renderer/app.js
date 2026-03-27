@@ -723,15 +723,10 @@ function _alignRebuildRows() {
         ${actionBtn}</div>`;
     });
 
-    // Transcription badge
-    const transBadge = row.transcribed === false
-      ? '<span style="font-size:9px;color:var(--c-warn);opacity:0.8;margin-left:4px" title="Not yet transcribed">(no caption)</span>'
-      : '';
-
     html += `<div style="display:flex;align-items:flex-start;gap:6px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
       <button class="icon-btn" title="Remove video" data-action="remove" data-row="${ri}" style="color:var(--c-error);font-size:14px">×</button>
       <span style="width:14px;padding-top:4px">${statusIcon}</span>
-      <span style="width:220px;padding-top:4px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(row.title)}">${esc(row.title)}${transBadge}</span>
+      <span style="width:220px;padding-top:4px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(row.title)}">${esc(row.title)}</span>
       <span style="padding-top:4px;opacity:0.3">→</span>
       <div style="flex:1">${slidesHtml}</div>
     </div>`;
@@ -1475,7 +1470,7 @@ async function attachPageHandlers() {
           const suggested = _alignAutoSuggest(cap.stem);
           initSlides = suggested !== '(none)' ? [suggested] : ['(none)'];
         }
-        return { stem: cap.stem, title, aligned: cap.aligned, transcribed: cap.transcribed, slides: initSlides };
+        return { stem: cap.stem, title, aligned: cap.aligned, slides: initSlides };
       });
 
       _alignRebuildRows();
