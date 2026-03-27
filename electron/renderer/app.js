@@ -647,7 +647,7 @@ function buildAlign() {
         Match each video to its lecture slides. Auto-suggested matches are pre-filled.
         Click <strong>+</strong> to add multiple slide files, or <strong>×</strong> to exclude a video.
       </div>
-      <div class="row" style="margin-top:8px">
+      <div class="row" style="margin-top:8px;align-items:flex-end">
         <div class="col expand">
           <span class="label">Course</span>
           <select id="align-course" class="select-ctrl">${courseOptions()}</select>
