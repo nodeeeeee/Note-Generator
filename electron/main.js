@@ -791,18 +791,44 @@ function registerIpc() {
     const alignDir  = path.join(base, 'alignment');
     const exts      = new Set(['.pdf', '.pptx', '.ppt', '.docx', '.doc']);
 
-    // Captions
+    // Videos: discover from manifest (all downloaded) + captions dir
+    // A video should appear as soon as it's downloaded, not only after transcription.
     let captions = [];
-    if (fs.existsSync(capDir)) {
-      captions = fs.readdirSync(capDir)
-        .filter(f => f.endsWith('.json'))
-        .sort()
-        .map(f => {
-          const stem = f.replace(/\.json$/, '');
-          const aligned = fs.existsSync(path.join(alignDir, f));
-          return { stem, filename: f, aligned };
-        });
+    const seenStems = new Set();
+
+    // Source 1: manifest — all downloaded videos for this course
+    const mf = path.join(DATA_DIR, 'manifest.json');
+    if (fs.existsSync(mf)) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(mf, 'utf8'));
+        for (const [, entry] of Object.entries(manifest)) {
+          if (entry.status !== 'done' || !entry.path) continue;
+          // Check video belongs to this course
+          const vidPath = entry.path;
+          if (!vidPath.includes(path.sep + String(cid) + path.sep) &&
+              !vidPath.includes('/' + String(cid) + '/')) continue;
+          const stem = path.basename(vidPath, path.extname(vidPath));
+          if (seenStems.has(stem)) continue;
+          seenStems.add(stem);
+          const hasCaptions = fs.existsSync(path.join(capDir, stem + '.json'));
+          const aligned = fs.existsSync(path.join(alignDir, stem + '.json'));
+          captions.push({ stem, filename: stem + '.json', aligned, transcribed: hasCaptions });
+        }
+      } catch {}
     }
+
+    // Source 2: captions dir — pick up any transcribed videos not in manifest
+    if (fs.existsSync(capDir)) {
+      for (const f of fs.readdirSync(capDir).filter(f => f.endsWith('.json')).sort()) {
+        const stem = f.replace(/\.json$/, '');
+        if (seenStems.has(stem)) continue;
+        seenStems.add(stem);
+        const aligned = fs.existsSync(path.join(alignDir, f));
+        captions.push({ stem, filename: f, aligned, transcribed: true });
+      }
+    }
+
+    captions.sort((a, b) => a.stem.localeCompare(b.stem));
 
     // Slides (recursive)
     const slides = [];
