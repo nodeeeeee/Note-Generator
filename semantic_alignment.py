@@ -1433,9 +1433,15 @@ def suggest_matches(
             slide_texts.append(t)
             slide_paths.append(sp)
 
-    if not cap_texts or not slide_texts:
-        print("  [match] Not enough text to embed — falling back to heuristics")
+    if not cap_texts:
+        print(f"  [match] No caption text extracted from {len(captions)} file(s) — check captions dir")
         return {}
+    if not slide_texts:
+        print(f"  [match] No slide text extracted from {len(all_slides)} file(s) — check materials dir")
+        print(f"  [match] Slide paths tried: {[s.name for s in all_slides[:5]]}")
+        return {}
+
+    print(f"  [match] Extracted text: {len(cap_texts)} caption(s), {len(slide_texts)} slide(s)")
 
     # ── Embed with selected model ────────────────────────────────────────────
     if model == "jina":
@@ -1465,19 +1471,53 @@ def suggest_matches(
             slide_embs = embs[len(cap_texts):]
             print(f"  [match] Embedded {len(cap_texts)} + {len(slide_texts)} texts")
         except Exception as e:
-            print(f"  [match] Model load failed: {e} — falling back to heuristics")
+            import traceback
+            print(f"  [match] Model load failed: {e}")
+            traceback.print_exc()
+            print("  [match] Falling back to heuristics")
             return {}
 
     # ── Cosine similarity → best match per caption ───────────────────────────
     sims = cap_embs @ slide_embs.T  # (n_caps, n_slides)
+
+    # Build a lookup for "upgrade" candidates:
+    # If we match "Lecture1 Intro.pdf", prefer "Lecture1 Intro With notes.pdf"
+    _upgrade: dict[str, Path] = {}  # base_stem → best version path
+    for sp in all_slides:
+        base = re.sub(r"\s+(With notes|Review|ann\d+)\b", "", sp.stem,
+                       flags=re.IGNORECASE).strip()
+        existing = _upgrade.get(base)
+        if existing is None:
+            _upgrade[base] = sp
+        else:
+            # Prefer: "With notes" > "Review" > annotated > plain
+            def _rank(p: Path) -> int:
+                n = p.name.lower()
+                if "with notes" in n: return 4
+                if "review" in n:     return 3
+                if re.search(r"ann\d", n): return 2
+                return 1
+            if _rank(sp) > _rank(existing):
+                _upgrade[base] = sp
 
     result: dict[str, str] = {}
     for i, stem in enumerate(cap_stems):
         best_j = int(np.argmax(sims[i]))
         best_sim = float(sims[i, best_j])
         best_path = slide_paths[best_j]
+
+        # Try to upgrade to a better version of the same lecture
+        base = re.sub(r"\s+(With notes|Review|ann\d+)\b", "", best_path.stem,
+                       flags=re.IGNORECASE).strip()
+        upgraded = _upgrade.get(base, best_path)
+        if upgraded != best_path:
+            print(f"  [match] {stem} → {upgraded.name}  (sim={best_sim:.3f}, "
+                  f"upgraded from {best_path.name})")
+            best_path = upgraded
+        else:
+            print(f"  [match] {stem} → {best_path.name}  (sim={best_sim:.3f})")
+
         rel = str(best_path.relative_to(course_dir))
-        print(f"  [match] {stem} → {best_path.name}  (sim={best_sim:.3f})")
         if best_sim > 0.15:
             result[stem] = rel
 

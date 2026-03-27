@@ -945,17 +945,27 @@ function registerIpc() {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = '';
+      let stderr = '';
       proc.stdout.on('data', d => { stdout += d.toString(); });
-      proc.stderr.on('data', d => { /* progress output — ignore */ });
+      proc.stderr.on('data', d => { stderr += d.toString(); });
       proc.on('close', (code) => {
-        if (code !== 0) { resolve({}); return; }
-        // Extract JSON after the __MATCH_RESULT__ marker
+        if (code !== 0) {
+          console.error(`[align:suggestMatches] exit ${code}\n${stderr.slice(-500)}`);
+          resolve({ __error: `Process exited with code ${code}: ${stderr.slice(-300)}` });
+          return;
+        }
         const marker = '__MATCH_RESULT__';
         const idx = stdout.indexOf(marker);
-        if (idx < 0) { resolve({}); return; }
+        if (idx < 0) {
+          console.error(`[align:suggestMatches] no marker in output:\n${stdout.slice(-300)}`);
+          resolve({ __error: `No results returned. Output: ${stdout.slice(-200)}` });
+          return;
+        }
         try {
           resolve(JSON.parse(stdout.slice(idx + marker.length).trim()));
-        } catch { resolve({}); }
+        } catch (e) {
+          resolve({ __error: `JSON parse error: ${e.message}` });
+        }
       });
     });
   });

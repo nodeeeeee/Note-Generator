@@ -1482,8 +1482,15 @@ async function attachPageHandlers() {
 
       const matches = await window.api.alignSuggestMatches(cid, model);
 
+      if (matches?.__error) {
+        snack(`Smart match failed: ${matches.__error}`, false);
+        if (statusEl) statusEl.textContent = 'Smart match failed — see error above.';
+        return;
+      }
+
       if (!matches || !Object.keys(matches).length) {
         snack('Embedding matching returned no results — using heuristic suggestions.', false);
+        if (statusEl) statusEl.textContent = 'No embedding matches found.';
         return;
       }
 
