@@ -673,29 +673,9 @@ function _alignSlideOptionsHtml(selected = '(none)') {
   return html;
 }
 
-function _alignAutoSuggest(capStem) {
-  // Simple heuristic: week number → lecture number, or token overlap
-  const capLower = capStem.toLowerCase().replace(/[-_]/g, ' ');
-  const weekMatch = capLower.match(/week\s*(\d+)/);
-  const lecMatch  = capLower.match(/lec(?:ture)?\s*(\d+)/);
-  const capNum    = weekMatch ? weekMatch[1] : (lecMatch ? lecMatch[1] : null);
-
-  let bestScore = 0, bestRel = '';
-  for (const s of AlignState.slideOptions) {
-    const sl = s.name.toLowerCase().replace(/[-_]/g, ' ');
-    // Lecture number match
-    const slNum = sl.match(/l(?:ecture)?\s*(\d+)/i);
-    if (capNum && slNum && capNum === slNum[1]) return s.rel;
-    // Token overlap
-    const capTokens = new Set(capLower.split(/\s+/));
-    const slTokens  = new Set(sl.split(/\s+/));
-    const inter = [...capTokens].filter(t => slTokens.has(t)).length;
-    const union = new Set([...capTokens, ...slTokens]).size;
-    const score = union ? inter / union : 0;
-    if (score > bestScore) { bestScore = score; bestRel = s.rel; }
-  }
-  return bestScore > 0.05 ? bestRel : '(none)';
-}
+// Auto-suggest is now computed server-side in main.js (align:scan handler)
+// using lecture-number matching, date matching, transcript keyword overlap,
+// and slide version preferences (with notes > review > plain).
 
 function _alignRebuildRows() {
   const container = document.getElementById('align-match-rows');
@@ -1469,10 +1449,10 @@ async function attachPageHandlers() {
         if (data.mapping[cap.stem] && data.mapping[cap.stem].length) {
           initSlides = data.mapping[cap.stem];
         } else {
-          const suggested = _alignAutoSuggest(cap.stem);
-          initSlides = suggested !== '(none)' ? [suggested] : ['(none)'];
+          // Use server-side suggestion (computed with transcript keywords + date matching)
+          initSlides = cap.suggested ? [cap.suggested] : ['(none)'];
         }
-        return { stem: cap.stem, title, aligned: cap.aligned, slides: initSlides };
+        return { stem: cap.stem, title, aligned: cap.aligned, transcribed: cap.transcribed, slides: initSlides };
       });
 
       _alignRebuildRows();

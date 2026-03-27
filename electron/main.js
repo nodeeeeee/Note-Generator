@@ -841,6 +841,95 @@ function registerIpc() {
       try { mapping = JSON.parse(fs.readFileSync(mapFile, 'utf8')); } catch {}
     }
 
+    // ── Smart auto-suggest for each caption ──────────────────────────────────
+    // Strategy: lecture-number match → date match → transcript keyword overlap
+    function autoSuggest(capStem) {
+      const cl = capStem.toLowerCase().replace(/[-_]/g, ' ');
+
+      // 1. Extract number from caption: Week3, Lec2, L5, etc.
+      const numMatch = cl.match(/week\s*(\d+)|lec(?:ture)?\s*(\d+)|\bl(\d+)\b/);
+      const capNum = numMatch ? (numMatch[1] || numMatch[2] || numMatch[3]) : null;
+
+      // 2. Extract date from caption: "06/03/2026" or "06_03_2026"
+      const dateMatch = capStem.match(/(\d{2})[/_](\d{2})[/_](\d{4})/);
+      const capDate = dateMatch ? dateMatch[1] + dateMatch[2] + dateMatch[3].slice(2) : null;
+
+      // 3. Read first few lines of transcript for keyword extraction
+      let capKeywords = new Set();
+      const capFile = path.join(capDir, capStem + '.json');
+      if (fs.existsSync(capFile)) {
+        try {
+          const capData = JSON.parse(fs.readFileSync(capFile, 'utf8'));
+          const segs = capData.segments || [];
+          // Sample ~20 segments evenly for topic keywords
+          const step = Math.max(1, Math.floor(segs.length / 20));
+          const words = segs.filter((_, i) => i % step === 0)
+            .map(s => s.text || '').join(' ').toLowerCase()
+            .replace(/[^a-z0-9\s]/g, '').split(/\s+/)
+            .filter(w => w.length > 4);
+          capKeywords = new Set(words);
+        } catch {}
+      }
+
+      let bestScore = 0;
+      let bestSlide = null;
+
+      for (const s of slides) {
+        const sl = s.name.toLowerCase().replace(/[-_]/g, ' ');
+        let score = 0;
+
+        // Strategy 1: Lecture number match
+        const slNumMatch = sl.match(/l(?:ecture)?\s*(\d+)/);
+        if (capNum && slNumMatch && capNum === slNumMatch[1]) {
+          score += 100;
+        }
+
+        // Strategy 2: Date match (video date → slide annotation date)
+        // e.g. "06/03/2026" matches "ann060326" in slide filename
+        if (capDate) {
+          if (sl.includes(capDate) || s.name.includes(capDate)) {
+            score += 80;
+          }
+        }
+
+        // Strategy 3: Token overlap between caption stem and slide name
+        const capTokens = new Set(cl.split(/\s+/).filter(t => t.length > 1));
+        const slTokens = new Set(sl.split(/\s+/).filter(t => t.length > 1));
+        const inter = [...capTokens].filter(t => slTokens.has(t)).length;
+        if (capTokens.size && slTokens.size) {
+          score += (inter / Math.max(capTokens.size, slTokens.size)) * 30;
+        }
+
+        // Strategy 4: Transcript keyword overlap with slide filename words
+        if (capKeywords.size > 0) {
+          const slWords = sl.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 4);
+          const kwHits = slWords.filter(w => capKeywords.has(w)).length;
+          score += kwHits * 10;
+        }
+
+        // Preference: "with notes" > "review" > annotated > plain
+        if (/with\s*notes/i.test(s.name)) score += 5;
+        else if (/review/i.test(s.name)) score += 3;
+        else if (/ann\d/i.test(s.name)) score += 2;
+
+        // Preference: files in a "Lectures" subfolder
+        if (/lecture/i.test(s.rel)) score += 2;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestSlide = s.rel;
+        }
+      }
+
+      return { suggested: bestScore > 5 ? bestSlide : null, score: bestScore };
+    }
+
+    // Attach suggestions to captions
+    for (const cap of captions) {
+      const { suggested } = autoSuggest(cap.stem);
+      cap.suggested = suggested;
+    }
+
     return { captions, slides, titles, mapping, base };
   });
 

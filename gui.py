@@ -1229,32 +1229,80 @@ def build_align(page: ft.Page, console: OutputConsole) -> ft.Column:
     # State:  rows = [ {stem, title, aligned, container, slide_dropdowns: [dd,...]} ]
     _match_state: dict = {"rows": [], "base": None, "slide_opts": []}
 
-    def _auto_suggest(cap_stem: str, slides: list, base: Path) -> list[str]:
-        """Find auto-matched slides for a caption. Returns list of rel paths."""
+    def _auto_suggest(cap_stem: str, slides: list, base: Path,
+                      cap_dir: Path | None = None) -> list[str]:
+        """Find auto-matched slides for a caption using multi-strategy scoring.
+
+        Strategies (scored and summed):
+          1. Lecture number match (Week3 → L3)      — +100
+          2. Date match (06/03/2026 → ann060326)    — +80
+          3. Filename token overlap                  — +0..30
+          4. Transcript keyword overlap with slide   — +10 per hit
+          5. Preference: "with notes" > "review"     — +5/+3/+2
+        """
         import re as _re
-        results: list[str] = []
-        cap_lower = cap_stem.lower().replace("-", " ").replace("_", " ")
-        cap_tokens = set(cap_lower.split())
+        cl = cap_stem.lower().replace("-", " ").replace("_", " ")
+
+        # Extract number from caption
+        num_m = _re.search(r"week\s*(\d+)|lec(?:ture)?\s*(\d+)|\bl(\d+)\b", cl)
+        cap_num = (num_m.group(1) or num_m.group(2) or num_m.group(3)) if num_m else None
+
+        # Extract date from caption (e.g. "06_03_2026")
+        date_m = _re.search(r"(\d{2})[/_](\d{2})[/_](\d{4})", cap_stem)
+        cap_date = (date_m.group(1) + date_m.group(2) + date_m.group(3)[2:]) if date_m else None
+
+        # Read transcript keywords
+        cap_keywords: set[str] = set()
+        if cap_dir:
+            cap_file = cap_dir / f"{cap_stem}.json"
+            if cap_file.exists():
+                try:
+                    import json as _json
+                    segs = _json.loads(cap_file.read_text()).get("segments", [])
+                    step = max(1, len(segs) // 20)
+                    words = " ".join(s.get("text", "") for s in segs[::step][:20]).lower()
+                    cap_keywords = {w for w in _re.findall(r"[a-z]{5,}", words)}
+                except Exception:
+                    pass
+
         best_score, best_rel = 0.0, ""
         for sp in slides:
             sl = sp.stem.lower().replace("-", " ").replace("_", " ")
-            sl_tokens = set(sl.split())
-            if cap_tokens and sl_tokens:
-                score = len(cap_tokens & sl_tokens) / len(cap_tokens | sl_tokens)
-                if score > best_score:
-                    best_score = score
-                    best_rel = str(sp.relative_to(base))
-            cap_num = _re.search(r"week\s*(\d+)|lec(?:ture)?\s*(\d+)|[Ll](\d+)", cap_stem)
-            sl_num  = _re.search(r"[Ll](?:ecture)?\s*(\d+)", sp.stem)
-            if cap_num and sl_num:
-                cn = next(g for g in cap_num.groups() if g)
-                sn = sl_num.group(1)
-                if cn == sn:
-                    best_rel = str(sp.relative_to(base))
-                    best_score = 1.0
-        if best_score > 0.05 and best_rel:
-            results.append(best_rel)
-        return results
+            score = 0.0
+
+            # Strategy 1: lecture number
+            sl_num_m = _re.search(r"l(?:ecture)?\s*(\d+)", sl)
+            if cap_num and sl_num_m and cap_num == sl_num_m.group(1):
+                score += 100
+
+            # Strategy 2: date match
+            if cap_date and cap_date in sp.name:
+                score += 80
+
+            # Strategy 3: token overlap
+            ct = set(cl.split())
+            st = set(sl.split())
+            if ct and st:
+                score += (len(ct & st) / max(len(ct), len(st))) * 30
+
+            # Strategy 4: transcript keyword overlap
+            if cap_keywords:
+                sl_words = set(_re.findall(r"[a-z]{5,}", sl))
+                score += len(cap_keywords & sl_words) * 10
+
+            # Strategy 5: prefer annotated versions
+            if _re.search(r"with\s*notes", sp.name, _re.IGNORECASE):
+                score += 5
+            elif _re.search(r"review", sp.name, _re.IGNORECASE):
+                score += 3
+            elif _re.search(r"ann\d", sp.name, _re.IGNORECASE):
+                score += 2
+
+            if score > best_score:
+                best_score = score
+                best_rel = str(sp.relative_to(base))
+
+        return [best_rel] if best_score > 5 and best_rel else []
 
     def _make_slide_dropdown(initial: str = "(none)") -> ft.Dropdown:
         """Create a single slide-file dropdown."""
@@ -1465,7 +1513,7 @@ def build_align(page: ft.Page, console: OutputConsole) -> ft.Column:
                 if not initials:
                     initials = ["(none)"]
             else:
-                initials = _auto_suggest(cap.stem, slides, base)
+                initials = _auto_suggest(cap.stem, slides, base, cap_dir)
                 if not initials:
                     initials = ["(none)"]
 
