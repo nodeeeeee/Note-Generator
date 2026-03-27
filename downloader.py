@@ -1378,13 +1378,26 @@ def main() -> None:
         print_material_list(files, logs)
         return
 
-    # ── --download-material FILENAME [FILENAME ...] ────────────────────────────
+    # ── --download-material NUMBER_OR_FILENAME [NUMBER_OR_FILENAME ...] ────────
     if args.download_material:
         print(f"\nDiscovering materials{' for course ' + str(args.course) if args.course else ''}...")
         files = discover_materials(canvas, args.course)
 
         targets: list[dict] = []
         for query in args.download_material:
+            # Try as a 1-based list number first (matches the # column from --material-list)
+            try:
+                idx = int(query)
+                if 1 <= idx <= len(files):
+                    targets.append(files[idx - 1])
+                    print(f"  #{idx}: {files[idx - 1]['display_name']}")
+                    continue
+                else:
+                    print(f"  [warn] Number {idx} out of range (1–{len(files)})")
+                    continue
+            except ValueError:
+                pass
+            # Fall back to filename substring matching
             matches = [f for f in files
                        if query.lower() in f["display_name"].lower()]
             if not matches:
