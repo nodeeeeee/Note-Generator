@@ -1490,7 +1490,7 @@ async function attachPageHandlers() {
       snack(`Found ${data.captions.length} video(s), ${data.slides.length} slide file(s).`);
     });
 
-    // Smart match button — embedding-based matching
+    // Smart match button — runs as a terminal command (reliable, visible output)
     document.getElementById('align-smart-btn')?.addEventListener('click', async () => {
       const cid = AlignState.courseId || document.getElementById('align-course')?.value;
       if (!cid) { snack('Select a course first.', false); return; }
@@ -1498,40 +1498,51 @@ async function attachPageHandlers() {
 
       const model = document.getElementById('align-match-model')?.value || 'bge-m3';
       const statusEl = document.getElementById('align-match-status');
-      if (statusEl) statusEl.textContent = `Running ${model} embedding matching… (this may take a moment)`;
+      if (statusEl) statusEl.textContent = `Running ${model} smart match…`;
 
-      const matches = await window.api.alignSuggestMatches(cid, model);
+      const python = await window.api.getPythonPath();
+      const paths  = await window.api.getScriptsPaths();
+      const cmd = [python, paths.align, '--course', cid,
+                   '--suggest-matches', '--match-model', model];
 
-      if (matches?.__error) {
-        // Show error in both snackbar and terminal for full diagnostics
-        Term.write(`\n✗ Smart match error:\n${matches.__error}\n`, 'err');
-        snack(`Smart match failed — see terminal for details.`, false);
-        if (statusEl) statusEl.textContent = 'Smart match failed — see terminal below.';
-        return;
-      }
+      // Run as a visible terminal command — user sees all output
+      if (State.running) { snack('Already running — stop it first.', false); return; }
+      Term.write(`\n${'─'.repeat(60)}\n`, 'cmd');
+      Term.showStop(true);
+      Term.setStatus('● matching…', 'var(--c-warn)');
+      State.running = true;
+      Term.write(`$ smart-match --model ${model}\n`, 'cmd');
 
-      // Filter out internal keys
-      const log = matches?.__log || '';
-      const matchKeys = Object.keys(matches).filter(k => !k.startsWith('__'));
-
-      if (!matchKeys.length) {
-        Term.write(`\n✗ Smart match returned no results.\n\n── Script output ──\n${log || '(empty)'}\n`, 'warn');
-        snack('No embedding matches — see terminal for details.', false);
-        if (statusEl) statusEl.textContent = 'No matches — see terminal.';
-        return;
-      }
-
-      // Apply embedding suggestions to rows
-      let updated = 0;
-      for (const row of AlignState.rows) {
-        if (matches[row.stem] && !row.stem.startsWith('__')) {
-          row.slides = [matches[row.stem]];
-          updated++;
+      window.api.offProcessEvents();
+      window.api.onProcessData(text => Term.process(text));
+      window.api.onProcessDone(async ({ code }) => {
+        State.running = false;
+        Term.showStop(false);
+        if (code === 0) {
+          Term.write('\n✓ Smart match completed.', 'ok');
+          Term.setStatus('✓ done', 'var(--c-success)');
+          // Reload the mapping file that the script saved
+          const data = await window.api.alignScan(cid);
+          if (data.mapping && Object.keys(data.mapping).length) {
+            for (const row of AlignState.rows) {
+              if (data.mapping[row.stem] && data.mapping[row.stem].length) {
+                row.slides = data.mapping[row.stem];
+              }
+            }
+            _alignRebuildRows();
+            snack(`Smart match applied: ${Object.keys(data.mapping).length} video(s) matched.`);
+          } else {
+            snack('Smart match saved no matches — check terminal output.', false);
+          }
+        } else if (code === -15 || code === null) {
+          // user stopped
+        } else {
+          Term.write(`\n✗  Smart match failed (code ${code}).`, 'err');
+          Term.setStatus(`✗ code ${code}`, 'var(--c-error)');
         }
-      }
-      if (log) Term.write(`\n── Smart match log ──\n${log}\n`, 'cmd');
-      _alignRebuildRows();
-      snack(`Smart match: ${updated}/${AlignState.rows.length} video(s) matched via ${model}.`);
+        if (statusEl) statusEl.textContent = '';
+      });
+      window.api.runProcess(cmd);
     });
 
     // Align with mapping button

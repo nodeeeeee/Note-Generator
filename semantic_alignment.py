@@ -1696,7 +1696,17 @@ def main() -> None:
             parser.error("--suggest-matches requires --course ID")
         course_dir = COURSE_DATA_DIR / str(args.course)
         matches = suggest_matches(course_dir, model=args.match_model)
-        # Output as JSON for IPC consumption
+        # Save as mapping file so the Align page can reload it
+        align_dir = course_dir / "alignment"
+        align_dir.mkdir(parents=True, exist_ok=True)
+        mapping_file = align_dir / "video_slide_mapping.json"
+        # Convert to mapping format: {stem: [rel_path]}
+        mapping = {k: [v] for k, v in matches.items()}
+        with open(mapping_file, "w") as f:
+            json.dump(mapping, f, indent=2)
+        print(f"\nMapping saved to {mapping_file}")
+        print(f"Matched {len(matches)} video(s) to slides.")
+        # Also output marker for IPC (backward compat)
         print("\n__MATCH_RESULT__")
         print(json.dumps(matches, indent=2))
         return
