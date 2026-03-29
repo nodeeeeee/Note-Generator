@@ -1034,49 +1034,43 @@ function registerIpc() {
       }
     }
 
-    // Run the actual matching script
-    const cmd = [python, script, '--course', String(cid),
-                 '--suggest-matches', '--match-model', model || 'bge-m3'];
+    // Run the actual matching script (synchronous — takes a few seconds)
+    const args = [script, '--course', String(cid),
+                  '--suggest-matches', '--match-model', model || 'bge-m3'];
+    diagLines.push(`Command: ${python} ${args.join(' ')}`);
+    const diagStr2 = diagLines.join('\n');
 
-    return new Promise((resolve) => {
-      let proc;
-      try {
-        proc = spawn(cmd[0], cmd.slice(1), {
-          env: { ...process.env, AUTONOTE_DATA_DIR: DATA_DIR },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-      } catch (e) {
-        resolve({ __error: `Failed to spawn process: ${e.message}\n\n${diagStr}` });
-        return;
-      }
-      let stdout = '';
-      let stderr = '';
-      proc.stdout.on('data', d => { stdout += d.toString(); });
-      proc.stderr.on('data', d => { stderr += d.toString(); });
-      proc.on('error', (e) => {
-        resolve({ __error: `Process error: ${e.message}\n\n${diagStr}` });
+    let result;
+    try {
+      result = spawnSync(python, args, {
+        encoding: 'utf8',
+        timeout: 120000,  // 2 minutes max
+        env: { ...process.env, AUTONOTE_DATA_DIR: DATA_DIR },
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
-      proc.on('close', (code) => {
-        const combined = stdout + '\n' + stderr;
-        if (code !== 0) {
-          resolve({ __error: `Exit code ${code}:\n${combined.trim()}\n\n── Diagnostics ──\n${diagStr}` });
-          return;
-        }
-        const marker = '__MATCH_RESULT__';
-        const idx = combined.indexOf(marker);
-        if (idx < 0) {
-          resolve({ __error: `No results marker in output:\n${combined.trim()}\n\n── Diagnostics ──\n${diagStr}` });
-          return;
-        }
-        try {
-          const result = JSON.parse(combined.slice(idx + marker.length).trim());
-          result.__log = combined.slice(0, idx).trim();
-          resolve(result);
-        } catch (e) {
-          resolve({ __error: `JSON parse error: ${e.message}\n${combined.trim()}` });
-        }
-      });
-    });
+    } catch (e) {
+      return { __error: `Failed to run: ${e.message}\n\n── Diagnostics ──\n${diagStr2}` };
+    }
+
+    const combined = (result.stdout || '') + '\n' + (result.stderr || '');
+
+    if (result.status !== 0) {
+      return { __error: `Exit code ${result.status}:\n${combined.trim()}\n\n── Diagnostics ──\n${diagStr2}` };
+    }
+
+    const marker = '__MATCH_RESULT__';
+    const idx = combined.indexOf(marker);
+    if (idx < 0) {
+      return { __error: `No results in output:\n${combined.trim()}\n\n── Diagnostics ──\n${diagStr2}` };
+    }
+
+    try {
+      const parsed = JSON.parse(combined.slice(idx + marker.length).trim());
+      parsed.__log = combined.slice(0, idx).trim();
+      return parsed;
+    } catch (e) {
+      return { __error: `JSON parse error: ${e.message}\n${combined.trim()}` };
+    }
   });
 
   ipcMain.handle('align:saveMapping', (_, { cid, mapping }) => {
