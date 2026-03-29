@@ -1000,15 +1000,15 @@ function registerIpc() {
     const courseDir = path.join(outDir, String(cid));
 
     // Pre-flight diagnostics
-    const diag = [];
-    diag.push(`Python: ${python} (exists: ${fs.existsSync(python)})`);
-    diag.push(`Script: ${script} (exists: ${fs.existsSync(script)})`);
-    diag.push(`DATA_DIR: ${DATA_DIR}`);
-    diag.push(`OutputDir: ${outDir}`);
-    diag.push(`CourseDir: ${courseDir} (exists: ${fs.existsSync(courseDir)})`);
-    diag.push(`Captions: ${fs.existsSync(path.join(courseDir, 'captions'))}`);
-    diag.push(`Materials: ${fs.existsSync(path.join(courseDir, 'materials'))}`);
-    console.log(`[align:suggestMatches] ${diag.join(' | ')}`);
+    const diagLines = [
+      `Python: ${python} (exists: ${fs.existsSync(python)})`,
+      `Script: ${script} (exists: ${fs.existsSync(script)})`,
+      `DATA_DIR: ${DATA_DIR}`,
+      `OutputDir: ${outDir}`,
+      `CourseDir: ${courseDir} (exists: ${fs.existsSync(courseDir)})`,
+      `Captions dir: ${fs.existsSync(path.join(courseDir, 'captions'))}`,
+      `Materials dir: ${fs.existsSync(path.join(courseDir, 'materials'))}`,
+    ];
 
     // Quick pre-check: can this Python import the needed packages?
     const checkCode = "import sys; " +
@@ -1022,19 +1022,22 @@ function registerIpc() {
       env: { ...process.env, AUTONOTE_DATA_DIR: DATA_DIR },
     });
     const chkOut = (chk.stdout || '') + (chk.stderr || '');
-    diag.push(`PreCheck: ${chkOut.replace(/\n/g, ' | ').trim()}`);
-    console.log(`[align:suggestMatches] precheck: ${chkOut.trim()}`);
+    diagLines.push(`PreCheck: ${chkOut.replace(/\n/g, ' | ').trim()}`);
+    const diagStr = diagLines.join('\n');
+    console.log(`[align:suggestMatches]\n${diagStr}`);
 
-    if (chkOut.includes('MISSING:') && !chkOut.includes('MISSING:OK') && !chkOut.includes('MISSING:\n')) {
+    // If packages are missing, return immediately with clear error
+    if (chkOut.includes('MISSING:') && !chkOut.includes('OK')) {
       const missing = chkOut.match(/MISSING:(.+)/)?.[1]?.trim();
       if (missing) {
-        resolve({ __error: `Python (${python}) is missing packages: ${missing}. Reinstall ML environment with these components enabled.` });
-        return;
+        return { __error: `Python (${python}) is missing packages: ${missing}.\nReinstall ML environment with these components enabled.\n\n${diagStr}` };
       }
     }
 
+    // Run the actual matching script
     const cmd = [python, script, '--course', String(cid),
                  '--suggest-matches', '--match-model', model || 'bge-m3'];
+
     return new Promise((resolve) => {
       let proc;
       try {
@@ -1043,7 +1046,7 @@ function registerIpc() {
           stdio: ['ignore', 'pipe', 'pipe'],
         });
       } catch (e) {
-        resolve({ __error: `Failed to spawn: ${e.message}` });
+        resolve({ __error: `Failed to spawn process: ${e.message}\n\n${diagStr}` });
         return;
       }
       let stdout = '';
@@ -1051,35 +1054,26 @@ function registerIpc() {
       proc.stdout.on('data', d => { stdout += d.toString(); });
       proc.stderr.on('data', d => { stderr += d.toString(); });
       proc.on('error', (e) => {
-        resolve({ __error: `Process error: ${e.message}` });
+        resolve({ __error: `Process error: ${e.message}\n\n${diagStr}` });
       });
       proc.on('close', (code) => {
-        // Combine stdout+stderr for diagnostics (Python prints to both)
         const combined = stdout + '\n' + stderr;
         if (code !== 0) {
-          // Look for common errors
-          let hint = '';
-          if (combined.includes('No module named')) {
-            const m = combined.match(/No module named '([^']+)'/);
-            hint = m ? `Missing package: ${m[1]}. Reinstall ML environment.` : '';
-          }
-          console.error(`[align:suggestMatches] exit ${code}\n${combined.slice(-500)}`);
-          resolve({ __error: hint || `Process exited with code ${code}. ${combined.slice(-200)}` });
+          resolve({ __error: `Exit code ${code}:\n${combined.trim()}\n\n── Diagnostics ──\n${diagStr}` });
           return;
         }
         const marker = '__MATCH_RESULT__';
         const idx = combined.indexOf(marker);
         if (idx < 0) {
-          resolve({ __error: combined.trim() || 'Script produced no output.' });
+          resolve({ __error: `No results marker in output:\n${combined.trim()}\n\n── Diagnostics ──\n${diagStr}` });
           return;
         }
         try {
           const result = JSON.parse(combined.slice(idx + marker.length).trim());
-          // Attach the log so the UI can show it even on empty results
           result.__log = combined.slice(0, idx).trim();
           resolve(result);
         } catch (e) {
-          resolve({ __error: `JSON parse error: ${e.message}\n\n${combined.trim()}` });
+          resolve({ __error: `JSON parse error: ${e.message}\n${combined.trim()}` });
         }
       });
     });
