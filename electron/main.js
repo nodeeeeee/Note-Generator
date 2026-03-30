@@ -340,9 +340,9 @@ function writeConstant(scriptKey, name, value) {
       newVal = `"${value}"`;  // quoted string
     }
     const re     = new RegExp(`^(${name}\\s*=\\s*)([^\\n#]+)`, 'm');
+    if (!re.test(src)) return false;           // constant not found in script
     const newSrc = src.replace(re, `$1${newVal}`);
-    if (newSrc === src) return false;
-    fs.writeFileSync(sp, newSrc);
+    if (newSrc !== src) fs.writeFileSync(sp, newSrc);  // skip write if unchanged
     return true;
   } catch { return false; }
 }
