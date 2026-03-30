@@ -276,14 +276,34 @@ def _find_panopto_items(canvas: Canvas, course) -> list[dict]:
 
     All three are merged and de-duplicated by session UUID.
     """
-    seen_ids: set[str] = set()
-    videos:   list[dict] = []
+    seen_ids:   set[str] = set()
+    seen_uuids: set[str] = set()   # Panopto session UUIDs for cross-strategy dedup
+    videos:     list[dict] = []
+
+    _UUID_PAT = re.compile(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        re.IGNORECASE,
+    )
 
     def _add(v: dict) -> None:
         uid = str(v["item_id"])
-        if uid not in seen_ids:
-            seen_ids.add(uid)
-            videos.append(v)
+        if uid in seen_ids:
+            return
+        # Extract Panopto session UUID from viewer_url, lti_url, or item_id itself
+        panopto_uuid = None
+        for url in (v.get("viewer_url") or "", v.get("lti_url") or ""):
+            m = _UUID_PAT.search(url)
+            if m:
+                panopto_uuid = m.group(0).lower()
+                break
+        if not panopto_uuid and _UUID_PAT.fullmatch(uid):
+            panopto_uuid = uid.lower()
+        if panopto_uuid and panopto_uuid in seen_uuids:
+            return
+        seen_ids.add(uid)
+        if panopto_uuid:
+            seen_uuids.add(panopto_uuid)
+        videos.append(v)
 
     # ── Strategy 1: module ExternalTool items ─────────────────────────────────
     s1_count = 0
