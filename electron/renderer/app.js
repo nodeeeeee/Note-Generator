@@ -521,7 +521,7 @@ function buildPipeline() {
       `, 'col expand')}
       ${mkCard(`
         <span class="label">Download</span>
-        ${mkSwitch('pp-stealth', 'Stealth mode for downloads', ps.stealth)}
+        ${mkSwitch('pp-stealth', 'Slack mode for downloads', ps.stealth)}
         <hr class="divider">
         <span class="label">Note generation</span>
         <div class="field">
@@ -564,7 +564,7 @@ function buildDownload() {
         </div>
         <div class="col">
           <span class="label">Options</span>
-          ${mkSwitch('dl-stealth', 'Stealth mode')}
+          ${mkSwitch('dl-stealth', 'Slack mode')}
         </div>
       </div>
     `)}

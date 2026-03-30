@@ -281,11 +281,11 @@ def menu_download() -> None:
             except ValueError:
                 _err("Invalid course ID — using all courses.")
 
-    # -- Stealth mode ----------------------------------------------------------
+    # -- Slack mode ------------------------------------------------------------
     secretly = False
     if choice in ("3", "4", "6", "7"):
         secretly = Confirm.ask(
-            "  Enable stealth mode? (random delays between downloads)",
+            "  Enable slack mode? (random delays between downloads)",
             default=False,
         )
         if secretly:
@@ -560,7 +560,7 @@ def menu_full_pipeline() -> None:
 
     if enabled["dl_material"] or enabled["dl_video"]:
         secretly = Confirm.ask(
-            "  Stealth mode for downloads? (random delays)",
+            "  Slack mode for downloads? (random delays)",
             default=False,
         )
 
@@ -580,7 +580,7 @@ def menu_full_pipeline() -> None:
         icon = "[success]✓[/success]" if enabled[key] else "[muted]–[/muted]"
         console.print(f"  {icon}  {label}")
     if secretly:
-        console.print("  [muted]  stealth mode on[/muted]")
+        console.print("  [muted]  slack mode on[/muted]")
     if enabled["generate"]:
         console.print(f"  [muted]  detail={detail}  course='{course_name}'[/muted]")
 

@@ -979,7 +979,7 @@ def build_pipeline(page: ft.Page, console: OutputConsole) -> ft.Column:
         "generate":    ft.Checkbox(label="Generate study notes", value=True,  fill_color=C_PRIMARY),
     }
 
-    secretly_sw   = ft.Switch(label="Stealth mode for downloads",
+    secretly_sw   = ft.Switch(label="Slack mode for downloads",
                                value=False, active_color=C_PRIMARY)
     course_name_f = _text_field("Course name for notes")
     detail_label  = ft.Text("7", size=22, weight=ft.FontWeight.BOLD, color=C_PRIMARY)
@@ -1102,7 +1102,7 @@ def build_download(page: ft.Page, console: OutputConsole) -> ft.Column:
         on_select=lambda e: course_val.update({"v": e.data}),
         include_all=True,
     )
-    secretly_sw  = ft.Switch(label="Stealth mode", value=False, active_color=C_PRIMARY)
+    secretly_sw  = ft.Switch(label="Slack mode", value=False, active_color=C_PRIMARY)
     video_nums_f = _text_field("Video numbers", hint="e.g. 1 3 5", expand=2)
     mat_names_f  = _text_field("Filename(s)", hint="partial names, space-separated",
                                 expand=True)

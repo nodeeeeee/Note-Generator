@@ -85,7 +85,7 @@ SKIP_COURSE_KEYWORDS = [
     "respect", "consent",
 ]
 
-# Stealth-mode delay ranges (seconds)
+# Slack-mode delay ranges (seconds)
 _SECRETLY_VIDEO_MIN = 5  * 60    # 5 min
 _SECRETLY_VIDEO_MAX = 15 * 60    # 15 min
 _SECRETLY_DIR_MIN   = 2  * 60    # 2 min
@@ -276,33 +276,22 @@ def _find_panopto_items(canvas: Canvas, course) -> list[dict]:
 
     All three are merged and de-duplicated by session UUID.
     """
-    seen_ids:   set[str] = set()
-    seen_uuids: set[str] = set()   # Panopto session UUIDs for cross-strategy dedup
-    videos:     list[dict] = []
-
-    _UUID_PAT = re.compile(
-        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-        re.IGNORECASE,
-    )
+    seen_ids:    set[str] = set()
+    seen_titles: set[str] = set()   # title-based dedup across strategies
+    videos:      list[dict] = []
 
     def _add(v: dict) -> None:
         uid = str(v["item_id"])
         if uid in seen_ids:
             return
-        # Extract Panopto session UUID from viewer_url, lti_url, or item_id itself
-        panopto_uuid = None
-        for url in (v.get("viewer_url") or "", v.get("lti_url") or ""):
-            m = _UUID_PAT.search(url)
-            if m:
-                panopto_uuid = m.group(0).lower()
-                break
-        if not panopto_uuid and _UUID_PAT.fullmatch(uid):
-            panopto_uuid = uid.lower()
-        if panopto_uuid and panopto_uuid in seen_uuids:
+        # Cross-strategy dedup: Panopto "delivery" IDs (LTI) differ from
+        # "session" IDs (folder API), so fall back to title matching.
+        title_key = v.get("title", "").strip().lower()
+        if title_key and title_key in seen_titles:
             return
         seen_ids.add(uid)
-        if panopto_uuid:
-            seen_uuids.add(panopto_uuid)
+        if title_key:
+            seen_titles.add(title_key)
         videos.append(v)
 
     # ── Strategy 1: module ExternalTool items ─────────────────────────────────

@@ -95,7 +95,7 @@ Each step only runs if the previous step succeeded. You can uncheck any step to 
 
 | Option | Description |
 |--------|-------------|
-| **Stealth mode** | Adds random delays between downloads (5–15 min between videos, 2–5 min between material folders) to avoid rate-limiting. Enable when downloading in bulk. |
+| **Slack mode** | Adds random delays between downloads (5–15 min between videos, 2–5 min between material folders) to avoid rate-limiting. Enable when downloading in bulk. |
 | **Course name** | Name that appears in the final notes file (auto-filled from any existing notes). |
 | **Detail level** | Controls note verbosity (see [Detail levels](#detail-levels) below). |
 | **Lecture filter** | Process only specific lectures, e.g. `1-5` or `1,3,5`. Leave blank for all. |
