@@ -101,9 +101,9 @@ system="""\
      > 内容
 7. 有趣类比或助记技巧用斜体。
 8. 图片插入规则（严格遵守）：
-   - **仅插入含视觉元素的图片**：图表、流程图、架构图、代码截图、数学推导、数据可视化等。
-   - **禁止插入纯文字图片**：纯文字要点、定义、标题幻灯片——笔记本身已用文字表达更好。
-   - 每隔 2–3 个概念段落插入一张图片，紧跟其说明的概念之后。
+   - **插入且仅插入含视觉元素的图片**：图表、流程图、架构图、代码截图、数学推导、数据可视化等。如果是与课程无关的行政或其他元素（如课程信息、投票二维码、签到提示等），即使是图片也不要插入。
+   - 纯文字要点、定义、标题幻灯片不需要插入——笔记本身已用文字表达更好。
+   - 尽可能多地插入含视觉元素的图片，紧跟其说明的概念之后。
    - 幻灯片格式：`![Slide N](images/LXX/slide_NNN.png) *(一句话描述)*`
    - 屏幕录制帧格式：`![Frame N](images/LXX/frame_NNN.png) *(一句话描述)*`
      （LXX 由调用方提供，禁止自行修改）。
@@ -126,7 +126,7 @@ chunk="""\
 要求：
 - 本片段对应笔记的二级标题为 `### {lec_num}.{chunk_idx} {chunk_title}`（**不要输出此行**，由调用方添加）
 - 详细度：{detail}/10。{detail_instruction}
-- 图片插入：**仅插入含图表/代码/公式等视觉元素的图片**，跳过纯文字截图。
+- 图片插入：**插入所有含视觉元素的图片**（图表、流程图、架构图、代码截图、数学推导、数据可视化等），跳过纯文字截图和与课程无关的行政元素。
   路径必须完全照抄上方「可用图片」列表中给出的路径（含 images/L** 子目录），禁止自造路径。
   每张图片后加一句斜体括号说明：`![Slide N](path) *(说明)*` 或 `![Frame N](path) *(说明)*`
 - 代码示例写完整可编译片段（含必要 include/imports），用正确的语言标签（```c, ```cpp, ```python）。
@@ -147,7 +147,7 @@ slide_only="""\
 要求：
 - 本片段对应笔记的二级标题为 `### {lec_num}.{chunk_idx} {chunk_title}`（**不要输出此行**）
 - 详细度：{detail}/10。{detail_instruction}
-- 图片插入：**仅插入含图表/代码/公式等视觉元素的图片**，跳过纯文字截图。
+- 图片插入：**插入所有含视觉元素的图片**（图表、流程图、架构图、代码截图、数学推导、数据可视化等），跳过纯文字截图和与课程无关的行政元素。
   路径必须完全照抄上方「可用图片」列表中给出的路径（含 images/L** 子目录），禁止自造路径。
   每张图片后加一句斜体括号说明：`![Slide N](path) *(说明)*` 或 `![Frame N](path) *(说明)*`
 - 代码示例写完整可编译片段，用正确的语言标签（```c, ```cpp, ```python）。
@@ -203,9 +203,9 @@ Writing guidelines:
      > content
 7. Use italics for interesting analogies or memory aids.
 8. Image insertion rules (strictly follow):
-   - **Only include images that contain visual elements**: diagrams, flowcharts, graphs, charts, plots, architecture drawings, code screenshots, mathematical derivations with spatial layout, annotated figures, tables with meaningful structure, or any non-trivial visual illustration.
-   - **Never include images that are purely text**: bullet-point slides, definition slides, title slides, or any frame/slide whose content can be fully expressed in written text. The notes themselves convey text better than a screenshot of text.
-   - Insert one image every 2–3 concept paragraphs, immediately after the concept it illustrates.
+   - **Insert all and only images that contain visual elements**: diagrams, flowcharts, architecture drawings, code screenshots, mathematical derivations, data visualizations, tables with meaningful structure, annotated figures, or any non-trivial visual illustration. Do NOT insert administrative or non-course elements (course info slides, polling QR codes, attendance prompts, etc.) even if they contain images.
+   - Pure text slides (bullet points, definitions, titles) do not need images — the notes express text better than a screenshot.
+   - Insert as many visual-element images as are available, immediately after the concept they illustrate.
    - Format for slide images: `![Slide N](images/LXX/slide_NNN.png) *(one-sentence description)*`
    - Format for screen-capture frames: `![Frame N](images/LXX/frame_NNN.png) *(one-sentence description)*`
      (LXX is provided by the caller — do not modify it; the caption must be in parentheses wrapped in asterisks exactly as shown).
@@ -228,7 +228,7 @@ Write study notes for the following course segment ({course_name} Lecture {lec_n
 Requirements:
 - The section heading for this segment is `### {lec_num}.{chunk_idx} {chunk_title}` (**do not output this line** — it is added by the caller).
 - Detail level: {detail}/10. {detail_instruction}
-- Images: **only include images that contain diagrams, charts, graphs, code screenshots, architecture drawings, or other visual elements that cannot be expressed as text.** Skip images of pure text, bullet points, or definitions — the notes cover that better in writing. Copy the exact path from the "Available images" list (including the images/L** subdirectory). Do not invent paths. After each image, add a one-sentence italic caption: `![Slide N](path) *(caption)*` or `![Frame N](path) *(caption)*`
+- Images: **insert all images that contain visual elements** (diagrams, charts, graphs, code screenshots, architecture drawings, data visualizations, mathematical derivations, etc.). Skip images of pure text, bullet points, or administrative/non-course elements. Copy the exact path from the "Available images" list (including the images/L** subdirectory). Do not invent paths. After each image, add a one-sentence italic caption: `![Slide N](path) *(caption)*` or `![Frame N](path) *(caption)*`
 - Code examples must be complete and compilable (with necessary includes/imports), using the correct language tag (```c, ```cpp, ```python).
 - Only cover the content in this segment; do not introduce material from other lectures.
 """,
@@ -247,7 +247,7 @@ Write study notes for {course_name} Lecture {lec_num}: {lec_title} based on the 
 Requirements:
 - The section heading is `### {lec_num}.{chunk_idx} {chunk_title}` (**do not output this line**).
 - Detail level: {detail}/10. {detail_instruction}
-- Images: **only include images that contain diagrams, charts, graphs, code screenshots, or visual elements.** Skip images of pure text or bullet points. Copy the exact path from the "Available images" list (including the images/L** subdirectory). Do not invent paths. After each image, add a one-sentence italic caption: `![Slide N](path) *(caption)*` or `![Frame N](path) *(caption)*`
+- Images: **insert all images that contain visual elements** (diagrams, charts, graphs, code screenshots, architecture drawings, data visualizations, etc.). Skip images of pure text or administrative/non-course elements. Copy the exact path from the "Available images" list (including the images/L** subdirectory). Do not invent paths. After each image, add a one-sentence italic caption: `![Slide N](path) *(caption)*` or `![Frame N](path) *(caption)*`
 - Code examples must be complete and compilable, using the correct language tag (```c, ```cpp, ```python).
 """,
 verify="""\
@@ -303,7 +303,7 @@ def _detail_instr(level: int) -> str:
 
 IMAGE_FILTER_MODEL      = "gpt-4o-mini"
 IMAGE_FILTER_WORD_MAX   = 12   # slides with ≤ this many words → remove without API call
-IMAGE_FILTER_HEURISTIC  = 35   # slides with > this many words AND no code/desc → remove
+IMAGE_FILTER_HEURISTIC  = 80   # slides with > this many words AND no code/desc → remove
 
 # Title/divider patterns that add no visual value
 _TITLE_PATTERN = re.compile(
@@ -369,32 +369,26 @@ def _vision_keep(img_path: Path, slide_text: str = "") -> bool:
 You are a study-notes curator deciding whether a lecture slide image should be \
 embedded in written notes.{context_block}
 
-## TWO conditions must BOTH be true to KEEP an image:
-
-1. The slide contains a meaningful visual element:
+## KEEP the image if the slide contains ANY course-relevant visual element:
    - Diagrams: system/architecture diagrams, component boxes connected by arrows
    - Flowcharts, state machines, decision trees, sequence/timing diagrams
    - Memory layouts, address-space maps, cache/pipeline stage illustrations
    - Graphs, plots, bar/line/pie charts, scatter plots showing data or trends
    - Tables with a meaningful grid structure (comparing options, relationships)
    - Mathematical formulas or derivations where spatial layout matters
+   - Code screenshots or annotated code with visual highlights
    - Annotated screenshots, highlighted output, or callout arrows
+   - Any non-trivial visual illustration related to the course
 
-2. The visual element is RELEVANT to the lecture subject matter:
-   - The diagram, chart, or figure directly explains or illustrates a concept \
-being taught
-   - It is NOT an administrative or logistical element such as: polling/quiz \
-prompts (PollEv, Mentimeter, Kahoot QR codes), attendance check slides, \
-course schedule tables, "any questions?" slides, logos, or sponsor slides
-
-## REMOVE if either condition fails:
-- Pure text slides (bullet points, prose, definitions) with no diagram
-- Code-only slides (code will be reproduced as text in the notes)
+## REMOVE only if the slide is clearly non-visual or non-course-related:
+- Pure text slides (bullet points, prose, definitions) with absolutely no \
+diagram, chart, figure, or visual element
 - Title slides, section dividers, agenda/outline, blank slides
-- Slides whose only visual is an unrelated administrative element \
-(QR code for a poll, login instructions, course info graphics)
+- Administrative elements unrelated to the course: polling/quiz prompts \
+(PollEv, Mentimeter, Kahoot QR codes), attendance check slides, \
+course info graphics, "any questions?" slides, logos, sponsor slides
 
-## Default: when genuinely uncertain about relevance, KEEP.
+## Default: when genuinely uncertain, KEEP.
 
 Reply with exactly one word: KEEP or REMOVE."""
 
@@ -779,8 +773,11 @@ def _build_chunk_prompt(
         else:
             cache_key = f"page_{s.index}"
             desc = img_cache.get(cache_key, "")
-            if desc or s.word_count < 30 or s.has_code:
-                note = desc[:80] if desc else ("has code" if s.has_code else "has diagram")
+            # Include most slides in the available images list — the LLM
+            # decides which to insert.  Only skip slides that are clearly
+            # heavy-text with no visual/code content and no cached description.
+            if desc or s.word_count < 80 or s.has_code:
+                note = desc[:80] if desc else ("has code" if s.has_code else "")
                 img_hints_lines.append(f"  Slide {s.index+1}: `{rel}` — {note}")
     image_hints = "\n".join(img_hints_lines) or "  (no images for this segment)"
 
