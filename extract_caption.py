@@ -45,6 +45,7 @@ MANIFEST_FILE = DATA_DIR / "manifest.json"
 # "api"   → always use OpenAI Whisper API
 WHISPER_BACKEND   = os.environ.get("AUTONOTE_WHISPER_BACKEND", "auto")
 VRAM_THRESHOLD_MIB = 15 * 1024   # ~15 GB nominal — accepts 16 GB cards (which report ~15.4 GB)
+FORCE_REGEN       = False        # set via --force CLI flag
 
 WHISPER_MODEL_SIZE = "large-v3"
 WHISPER_BEAM_SIZE  = 5
@@ -232,7 +233,7 @@ def transcribe_api(video_path: Path, caption_path: Path) -> bool:
     """
     import time as _time
 
-    if caption_path.exists():
+    if not FORCE_REGEN and caption_path.exists():
         print(f"  [skip] Caption already exists: {caption_path.name}")
         return True
 
@@ -417,7 +418,7 @@ def transcribe_local(video_path: Path, caption_path: Path) -> bool:
     Transcribe a video file directly with faster-whisper large-v3 on GPU.
     faster-whisper uses ffmpeg internally to decode audio from the video.
     """
-    if caption_path.exists():
+    if not FORCE_REGEN and caption_path.exists():
         print(f"  [skip] Caption already exists: {caption_path.name}")
         return True
 
@@ -580,7 +581,7 @@ def process_video(video_path: Path, manifest: dict, manifest_key: str | None) ->
     course_dir   = video_path.parent.parent     # [project]/[course_id]/
     caption_path = course_dir / "captions" / f"{video_path.stem}.json"
 
-    if caption_path.exists():
+    if not FORCE_REGEN and caption_path.exists():
         print(f"  [skip] Already captioned: {video_path.name}")
         if manifest_key and manifest_key in manifest:
             manifest[manifest_key]["caption"] = str(caption_path)
@@ -601,7 +602,11 @@ def process_video(video_path: Path, manifest: dict, manifest_key: str | None) ->
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def get_pending(manifest: dict) -> list[tuple[str, str]]:
-    """Return (key, video_path) for downloaded videos not yet captioned."""
+    """Return (key, video_path) for downloaded videos not yet captioned.
+
+    When FORCE_REGEN is True, returns ALL downloaded videos regardless of
+    whether captions already exist.
+    """
     pending = []
     for key, entry in manifest.items():
         if entry.get("status") != "done":
@@ -609,9 +614,12 @@ def get_pending(manifest: dict) -> list[tuple[str, str]]:
         vpath = entry.get("path")
         if not vpath or not Path(vpath).exists():
             continue
-        caption = Path(vpath).parent.parent / "captions" / f"{Path(vpath).stem}.json"
-        if not caption.exists():
+        if FORCE_REGEN:
             pending.append((key, vpath))
+        else:
+            caption = Path(vpath).parent.parent / "captions" / f"{Path(vpath).stem}.json"
+            if not caption.exists():
+                pending.append((key, vpath))
     return pending
 
 
@@ -620,7 +628,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Extract captions from Canvas lecture videos")
     parser.add_argument("--video", metavar="PATH",
                         help="Process a single video file (ignores manifest)")
+    parser.add_argument("--force", action="store_true",
+                        help="Re-transcribe all videos even if captions already exist")
     args = parser.parse_args()
+
+    global FORCE_REGEN
+    if args.force:
+        FORCE_REGEN = True
 
     manifest = load_manifest()
 

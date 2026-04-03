@@ -1470,10 +1470,14 @@ async function attachPageHandlers() {
         chain.push(['Download videos', c]);
       }
       if (steps.includes('transcribe')) {
-        chain.push(['Transcribe', [python, paths.transcribe]]);
+        const c = [python, paths.transcribe];
+        if (force) c.push('--force');
+        chain.push(['Transcribe', c]);
       }
       if (steps.includes('align')) {
-        chain.push(['Align', [python, paths.align, '--course', cid]]);
+        const c = [python, paths.align, '--course', cid];
+        if (force) c.push('--force');
+        chain.push(['Align', c]);
       }
       if (steps.includes('generate')) {
         const c = [python, paths.generate, '--course', cid, '--course-name', name || courseNameFromId(cid), '--detail', detail, '--per-video'];

@@ -1578,7 +1578,8 @@ def _load_mapping(mapping_path: Path, course_dir: Path) -> dict[str, list[Path]]
 
 
 def process_course(course_id: int | str, use_jina: bool = False,
-                   mapping_path: Path | None = None) -> None:
+                   mapping_path: Path | None = None,
+                   force: bool = False) -> None:
     course_dir  = COURSE_DATA_DIR / str(course_id)
     captions_dir = course_dir / "captions"
     print(f"Course dir : {course_dir}", flush=True)
@@ -1677,15 +1678,16 @@ def process_course(course_id: int | str, use_jina: bool = False,
                 continue
 
         # Check if all output files for this group already exist
-        if len(slide_group) == 1:
-            out_file = out_dir / f"{cap.stem}.json"   # legacy single-file naming
-            if out_file.exists():
-                print(f"  [skip] Already aligned: {cap.stem}")
-                continue
-        else:
-            if all((out_dir / f"{sp.stem}.json").exists() for sp in slide_group):
-                print(f"  [skip] Already aligned: {[sp.name for sp in slide_group]}")
-                continue
+        if not force:
+            if len(slide_group) == 1:
+                out_file = out_dir / f"{cap.stem}.json"   # legacy single-file naming
+                if out_file.exists():
+                    print(f"  [skip] Already aligned: {cap.stem}")
+                    continue
+            else:
+                if all((out_dir / f"{sp.stem}.json").exists() for sp in slide_group):
+                    print(f"  [skip] Already aligned: {[sp.name for sp in slide_group]}")
+                    continue
 
         # Use Jina multimodal for single PDF slides if available
         if use_jina and len(slide_group) == 1 and slide_group[0].suffix.lower() == ".pdf":
@@ -1726,6 +1728,8 @@ def main() -> None:
                         choices=["bge-m3", "jina", "mpnet"],
                         help="Embedding model for --suggest-matches "
                              "(default: bge-m3, alternatives: jina, mpnet)")
+    parser.add_argument("--force", action="store_true",
+                        help="Re-align all captions even if alignment files already exist")
     args = parser.parse_args()
 
     if args.suggest_matches:
@@ -1750,7 +1754,8 @@ def main() -> None:
 
     if args.course:
         mapping = Path(args.mapping) if args.mapping else None
-        process_course(args.course, use_jina=args.jina, mapping_path=mapping)
+        process_course(args.course, use_jina=args.jina, mapping_path=mapping,
+                       force=args.force)
         return
 
     if not args.caption or not args.slides:
