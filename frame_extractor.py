@@ -59,6 +59,12 @@ MIN_SCENE_GAP = 2.0
 # Maximum number of frames to extract (safety limit for very long recordings).
 MAX_FRAMES = 500
 
+# Perceptual-hash threshold for considering two frames as the same slide page.
+# dHash is 16×16 = 256 bits; incremental reveals (bullet-by-bullet, animation
+# steps) typically differ by 10–35 bits, while genuine slide transitions differ
+# by 60+ bits.  45 comfortably separates the two distributions.
+PAGE_SIMILARITY_THRESHOLD = 45
+
 
 # ── Screen vs Camera auto-detection ──────────────────────────────────────────
 
@@ -203,21 +209,46 @@ def _hamming(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
 
+def _information_score(img) -> int:
+    """Score an image by visual information content (edge/detail density).
+
+    Computes the sum of horizontal and vertical pixel-intensity gradients on a
+    small grayscale thumbnail.  Frames with more text, diagrams, or revealed
+    bullets score higher than sparse or blank versions of the same slide.
+    """
+    from PIL import Image as PILImage
+    small = img.convert("L").resize((160, 120), PILImage.LANCZOS)
+    pixels = list(small.getdata())
+    w, h = 160, 120
+    score = 0
+    for y in range(h):
+        row = y * w
+        for x in range(w - 1):
+            score += abs(pixels[row + x] - pixels[row + x + 1])
+    for y in range(h - 1):
+        row = y * w
+        for x in range(w):
+            score += abs(pixels[row + x] - pixels[row + w + x])
+    return score
+
+
 # ── Intelligent scene detection ──────────────────────────────────────────────
 
 def detect_scenes(video_path: Path, threshold: float = SCENE_THRESHOLD,
                   min_gap: float = MIN_SCENE_GAP) -> list[float]:
     """Detect unique slide/screen changes in a video.
 
-    Strategy (two-pass):
+    Strategy (three-pass):
       1. Use ffmpeg scene filter to find raw scene-change timestamps
       2. If too few detected (common with camera/lecture videos), fall back
          to periodic sampling every 10 seconds
-      3. Extract a candidate frame at each timestamp
-      4. Compute perceptual hashes (dHash) to deduplicate — only keep frames
-         that differ significantly from the previous kept frame
+      3. Extract a candidate frame at each timestamp, compute perceptual
+         hashes (dHash) and information scores.  Group consecutive frames
+         that belong to the same slide page (incremental reveals, animations)
+         and keep only the most informative frame from each group.
 
-    This prevents both missing slides and keeping duplicate frames.
+    This prevents both missing slides and keeping duplicate frames from
+    the same slide page (e.g. bullet-by-bullet reveals).
     """
     duration = get_video_duration(video_path)
 
@@ -262,18 +293,23 @@ def detect_scenes(video_path: Path, threshold: float = SCENE_THRESHOLD,
         raw_timestamps = merged
         print(f"  After merge: {len(raw_timestamps)} candidates")
 
-    # ── Pass 3: extract candidate frames and deduplicate via perceptual hash ─
+    # ── Pass 3: group frames by slide page, pick the most informative frame ──
+    #
+    # Multiple scene-change frames may come from the same slide page (e.g.
+    # incremental bullet reveals, animations, cursor movements).  We cluster
+    # consecutive frames whose perceptual hashes are similar (same page) and
+    # keep only the frame with the highest visual information score — typically
+    # the most "complete" version of that slide.
     import tempfile
     tmp_dir = Path(tempfile.mkdtemp(prefix="scene_dedup_"))
-    HASH_THRESHOLD = 30  # dHash bits that must differ to consider "new slide"
 
     try:
         from PIL import Image as PILImage
 
-        unique_timestamps: list[float] = []
-        prev_hash: int | None = None
-
+        # Extract candidate frames and compute hashes + info scores
+        candidates: list[tuple[float, int, int]] = []  # (timestamp, hash, info_score)
         print(f"  Deduplicating {len(raw_timestamps)} candidates via perceptual hash...")
+
         for ts in raw_timestamps[:MAX_FRAMES * 2]:
             png = tmp_dir / f"cand_{ts:.1f}.png"
             subprocess.run(
@@ -287,15 +323,41 @@ def detect_scenes(video_path: Path, threshold: float = SCENE_THRESHOLD,
 
             img = PILImage.open(png)
             h = _perceptual_hash(img)
-
-            if prev_hash is None or _hamming(h, prev_hash) >= HASH_THRESHOLD:
-                unique_timestamps.append(ts)
-                prev_hash = h
-            # else: duplicate frame, skip
-
+            score = _information_score(img)
+            candidates.append((ts, h, score))
             png.unlink()  # free disk space
 
-        print(f"  Unique frames after dedup: {len(unique_timestamps)}")
+        # Group consecutive frames into slide pages.  A new page starts when
+        # the frame differs from BOTH the group anchor (first frame) and the
+        # previous frame by >= PAGE_SIMILARITY_THRESHOLD bits.
+        groups: list[list[tuple[float, int, int]]] = []
+        current: list[tuple[float, int, int]] = []
+
+        for cand in candidates:
+            ts, h, score = cand
+            if not current:
+                current.append(cand)
+            else:
+                anchor_h = current[0][1]
+                prev_h   = current[-1][1]
+                # Same page if similar to anchor OR similar to previous frame
+                if (_hamming(h, anchor_h) < PAGE_SIMILARITY_THRESHOLD or
+                        _hamming(h, prev_h) < PAGE_SIMILARITY_THRESHOLD):
+                    current.append(cand)
+                else:
+                    groups.append(current)
+                    current = [cand]
+        if current:
+            groups.append(current)
+
+        # From each page group, pick the frame with the highest info score
+        unique_timestamps: list[float] = []
+        for grp in groups:
+            best = max(grp, key=lambda c: c[2])  # highest info score
+            unique_timestamps.append(best[0])
+
+        print(f"  {len(candidates)} candidates → {len(groups)} slide page(s) "
+              f"(threshold={PAGE_SIMILARITY_THRESHOLD})")
 
     except ImportError:
         print("  [warn] PIL not available — skipping deduplication")
