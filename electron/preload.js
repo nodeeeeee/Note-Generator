@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // ── Course helpers ────────────────────────────────────────────────────────
   listLectures:   (cid)  => ipcRenderer.invoke('course:listLectures', cid),
+  listCourseVideos: (cid) => ipcRenderer.invoke('course:listVideos', cid),
+  deleteVideoData:  (cid, stem) => ipcRenderer.invoke('course:deleteVideo', { cid, stem }),
 
   // ── Align: scan + mapping ───────────────────────────────────────────────
   alignScan:           (cid)               => ipcRenderer.invoke('align:scan', cid),

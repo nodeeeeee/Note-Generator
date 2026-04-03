@@ -518,6 +518,90 @@ input, select, textarea { font: inherit; }
   gap: 4px;
 }
 
+/* ── Course detail modal ──────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-panel {
+  background: var(--c-surface);
+  border-radius: 10px;
+  width: 600px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--c-white-12);
+}
+
+.modal-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--c-primary);
+  margin: 0;
+}
+
+.modal-body {
+  padding: 12px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.video-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--c-white-08);
+}
+
+.video-row:last-child { border-bottom: none; }
+
+.video-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--c-white-88);
+  word-break: break-word;
+}
+
+.video-chips {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-delete {
+  background: transparent;
+  color: var(--c-error);
+  border: 1px solid var(--c-error);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition), color var(--transition);
+}
+.btn-delete:hover { background: var(--c-error); color: #fff; }
+
+.course-card { cursor: pointer; transition: box-shadow var(--transition); }
+.course-card:hover { box-shadow: 0 3px 12px rgba(77,208,225,0.25); }
+
 /* ── Settings constant row ─────────────────────────────────────────────────── */
 .const-row {
   display: flex;

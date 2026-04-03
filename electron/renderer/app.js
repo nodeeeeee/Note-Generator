@@ -494,6 +494,84 @@ async function loadDashboardStats() {
   }
 }
 
+// ── Course detail modal (video list + delete) ────────────────────────────────
+async function showCourseDetail(courseId) {
+  const c = State.courses.find(x => String(x.id) === String(courseId));
+  const label = c ? c.name : `Course ${courseId}`;
+
+  // Create overlay
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2>${esc(label)}</h2>
+        <button class="btn-icon" id="modal-close">${I.close || '&times;'} Close</button>
+      </div>
+      <div class="modal-body" id="modal-body">
+        <div style="color:var(--c-white-45);padding:20px 0;text-align:center">Loading videos…</div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // Close handlers
+  overlay.querySelector('#modal-close').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  // Load video data
+  try {
+    const videos = await window.api.listCourseVideos(courseId);
+    const body = overlay.querySelector('#modal-body');
+
+    if (!videos || videos.length === 0) {
+      body.innerHTML = '<div style="color:var(--c-white-45);padding:20px 0;text-align:center">No transcribed videos found.<br>Run Transcribe first.</div>';
+      return;
+    }
+
+    let html = '';
+    for (const v of videos) {
+      const alignChip = v.hasAlignment
+        ? chip('aligned', 'chip-success')
+        : chip('no align', 'chip-none');
+      const notesChip = v.hasNotes
+        ? chip('notes', 'chip-success')
+        : chip('no notes', 'chip-none');
+      html += `<div class="video-row" data-stem="${esc(v.stem)}">
+        <div class="video-name">${esc(v.stem)}</div>
+        <div class="video-chips">${alignChip}${notesChip}</div>
+        <button class="btn-delete" data-stem="${esc(v.stem)}">Delete</button>
+      </div>`;
+    }
+    body.innerHTML = html;
+
+    // Delete handlers
+    body.querySelectorAll('.btn-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const stem = e.target.dataset.stem;
+        if (!confirm(`Delete transcript, alignment, and notes for:\n${stem}?`)) return;
+        try {
+          const result = await window.api.deleteVideoData(courseId, stem);
+          snack(`Deleted ${result.deleted.length} file(s)`);
+          // Remove row from UI
+          const row = body.querySelector(`.video-row[data-stem="${CSS.escape(stem)}"]`);
+          if (row) row.remove();
+          // Check if modal is now empty
+          if (!body.querySelector('.video-row')) {
+            body.innerHTML = '<div style="color:var(--c-white-45);padding:20px 0;text-align:center">All videos deleted.</div>';
+          }
+          // Refresh dashboard stats
+          loadDashboardStats();
+        } catch (err) {
+          snack('Delete failed: ' + (err.message || err), false);
+        }
+      });
+    });
+  } catch (err) {
+    const body = overlay.querySelector('#modal-body');
+    body.innerHTML = `<div style="color:var(--c-error);padding:20px 0">Error loading videos: ${esc(err.message || String(err))}</div>`;
+  }
+}
+
 // ── Page: Full Pipeline ────────────────────────────────────────────────────────
 function buildPipeline() {
   const ps  = State.pipeline;
@@ -1302,6 +1380,11 @@ async function attachPageHandlers() {
   // ── Dashboard ────────────────────────────────────────────────────────────────
   if (pg === 0) {
     document.getElementById('dash-refresh-btn')?.addEventListener('click', () => refreshCourses());
+    // Click on course card → show detail modal with video list
+    for (const c of State.courses) {
+      const card = document.getElementById(`cc-${c.id}`);
+      if (card) card.addEventListener('click', () => showCourseDetail(c.id));
+    }
     loadDashboardStats();
     return;
   }
@@ -1319,7 +1402,7 @@ async function attachPageHandlers() {
     document.getElementById('pp-course')?.addEventListener('change', e => {
       State.pipeline.courseId = e.target.value;
       const nameEl = document.getElementById('pp-course-name');
-      if (nameEl && !nameEl.value.trim()) {
+      if (nameEl) {
         nameEl.value = courseNameFromId(e.target.value);
         State.pipeline.courseName = nameEl.value;
       }

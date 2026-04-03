@@ -1625,6 +1625,23 @@ def process_course(course_id: int | str, use_jina: bool = False,
 
     embedder = None if use_jina else None  # lazy-load only when needed
 
+    # ── Pre-compute BGE-M3 matches for efficient video↔slide matching ────────
+    bge_matches: dict[str, list[Path]] = {}
+    try:
+        raw = suggest_matches(course_dir, model="bge-m3")
+        for stem, rel in raw.items():
+            sp = course_dir / rel
+            if sp.exists():
+                num = _lec_num(sp)
+                if num is not None and num in slides_by_num:
+                    bge_matches[stem] = sorted(slides_by_num[num])
+                else:
+                    bge_matches[stem] = [sp]
+        if bge_matches:
+            print(f"  [bge-m3] Pre-matched {len(bge_matches)} video(s) to slides")
+    except Exception as e:
+        print(f"  [bge-m3] Not available, will fall back to mpnet: {e}")
+
     for cap in captions:
         # Skip captions flagged as low-quality (wrong/empty recordings)
         try:
@@ -1644,8 +1661,12 @@ def process_course(course_id: int | str, use_jina: bool = False,
         else:
             # ── Priority 2: automatic name/number matching ───────────────────
             slide_group = _find_best_slide_group(cap, slides_by_num, all_slides)
+            if not slide_group and cap.stem in bge_matches:
+                # ── Priority 3: BGE-M3 embedding match ──────────────────────
+                slide_group = bge_matches[cap.stem]
+                print(f"  [bge-m3] {cap.name} → {[s.name for s in slide_group]}")
             if not slide_group:
-                # ── Priority 3: content embedding fallback ───────────────────
+                # ── Priority 4: mpnet content embedding fallback ─────────────
                 if embedder is None:
                     embedder = get_embedder()
                 slide_group = _content_match_slide_group(

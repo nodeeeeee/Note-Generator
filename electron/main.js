@@ -746,6 +746,177 @@ function discoverLectures(courseId) {
   return slides.map(sl => ({ ...sl, alignCount }));
 }
 
+// ── Course video listing & deletion ──────────────────────────────────────────
+
+function listCourseVideos(courseId) {
+  const courseDir  = path.join(getOutputDir(), String(courseId));
+  const capDir     = path.join(courseDir, 'captions');
+  const alignDir   = path.join(courseDir, 'alignment');
+  const notesDir   = path.join(courseDir, 'notes');
+  const sectionsDir = path.join(notesDir, 'sections');
+
+  if (!fs.existsSync(capDir)) return [];
+
+  const captions = fs.readdirSync(capDir)
+    .filter(f => f.endsWith('.json'))
+    .sort();
+
+  // Build map: captionStem → [{file, slideFile, lecNum}]
+  const alignMap = {};
+  if (fs.existsSync(alignDir)) {
+    for (const af of fs.readdirSync(alignDir)) {
+      if (!af.endsWith('.json') || af.endsWith('.compact.json')
+          || af.includes('mapping') || af.includes('image_cache')) continue;
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(alignDir, af), 'utf8'));
+        const lecStem = data.lecture || '';
+        if (!alignMap[lecStem]) alignMap[lecStem] = [];
+        alignMap[lecStem].push({
+          file: af,
+          slideFile: data.slide_file || '',
+          lecNum: extractLecNum(data.slide_file || af),
+        });
+      } catch { /* skip unreadable files */ }
+    }
+  }
+
+  // List note section files
+  const sectionFiles = fs.existsSync(sectionsDir)
+    ? fs.readdirSync(sectionsDir).filter(f => f.endsWith('.md'))
+    : [];
+
+  // List per-video note files
+  const noteFiles = fs.existsSync(notesDir)
+    ? fs.readdirSync(notesDir).filter(f => f.endsWith('.md'))
+    : [];
+
+  return captions.map(f => {
+    const stem = f.replace(/\.json$/, '');
+    const aligns = alignMap[stem] || [];
+    const hasAlignment = aligns.length > 0;
+
+    // Check for notes: section files matching any associated lecture number
+    const lecNums = aligns.map(a => a.lecNum).filter(n => n != null);
+    const hasNotes = lecNums.some(num => {
+      const prefix = `L${String(num).padStart(2, '0')}_S`;
+      return sectionFiles.some(sf => sf.startsWith(prefix));
+    });
+
+    return { stem, filename: f, hasAlignment, hasNotes, lecNums };
+  });
+}
+
+function deleteVideoData(courseId, captionStem) {
+  const courseDir  = path.join(getOutputDir(), String(courseId));
+  const capDir     = path.join(courseDir, 'captions');
+  const alignDir   = path.join(courseDir, 'alignment');
+  const notesDir   = path.join(courseDir, 'notes');
+  const sectionsDir = path.join(notesDir, 'sections');
+  const imagesDir  = path.join(notesDir, 'images');
+
+  const deleted = [];
+
+  // 1. Delete caption file
+  const capFile = path.join(capDir, captionStem + '.json');
+  if (fs.existsSync(capFile)) {
+    fs.unlinkSync(capFile);
+    deleted.push('captions/' + captionStem + '.json');
+  }
+
+  // 2. Find and delete alignment files (by name match or lecture field)
+  const lecNums = new Set();
+  if (fs.existsSync(alignDir)) {
+    for (const af of fs.readdirSync(alignDir)) {
+      if (!af.endsWith('.json') || af.includes('mapping') || af.includes('image_cache')) continue;
+      const afPath = path.join(alignDir, af);
+
+      // Direct name match (caption stem)
+      if (af === captionStem + '.json' || af === captionStem + '.compact.json') {
+        // Read lecture number before deleting
+        if (!af.endsWith('.compact.json')) {
+          try {
+            const data = JSON.parse(fs.readFileSync(afPath, 'utf8'));
+            const num = extractLecNum(data.slide_file || af);
+            if (num != null) lecNums.add(num);
+          } catch {}
+        }
+        fs.unlinkSync(afPath);
+        deleted.push('alignment/' + af);
+        continue;
+      }
+
+      // Check lecture field for multi-slide outputs (named after slide stem)
+      if (!af.endsWith('.compact.json')) {
+        try {
+          const data = JSON.parse(fs.readFileSync(afPath, 'utf8'));
+          if (data.lecture === captionStem) {
+            const num = extractLecNum(data.slide_file || af);
+            if (num != null) lecNums.add(num);
+            fs.unlinkSync(afPath);
+            deleted.push('alignment/' + af);
+            // Also delete compact version
+            const compactPath = afPath.replace('.json', '.compact.json');
+            if (fs.existsSync(compactPath)) {
+              fs.unlinkSync(compactPath);
+              deleted.push('alignment/' + af.replace('.json', '.compact.json'));
+            }
+          }
+        } catch {}
+      }
+    }
+  }
+
+  // 3. Delete related note sections and per-video notes
+  for (const num of lecNums) {
+    const prefix = `L${String(num).padStart(2, '0')}`;
+
+    // Delete section files: L{num}_S*.md
+    if (fs.existsSync(sectionsDir)) {
+      for (const sf of fs.readdirSync(sectionsDir)) {
+        if (sf.startsWith(prefix + '_S') && sf.endsWith('.md')) {
+          fs.unlinkSync(path.join(sectionsDir, sf));
+          deleted.push('notes/sections/' + sf);
+        }
+      }
+    }
+
+    // Delete per-video note files: *_L{num}_notes.*
+    if (fs.existsSync(notesDir)) {
+      for (const nf of fs.readdirSync(notesDir)) {
+        if (nf.includes(`_${prefix}_notes`) && !fs.statSync(path.join(notesDir, nf)).isDirectory()) {
+          fs.unlinkSync(path.join(notesDir, nf));
+          deleted.push('notes/' + nf);
+        }
+      }
+    }
+
+    // Delete images directory: images/L{num}/
+    const imgDir = path.join(imagesDir, prefix);
+    if (fs.existsSync(imgDir)) {
+      fs.rmSync(imgDir, { recursive: true, force: true });
+      deleted.push('notes/images/' + prefix + '/');
+    }
+  }
+
+  // 4. Delete merged notes file if any lecture was removed (it needs regeneration)
+  if (lecNums.size > 0 && fs.existsSync(notesDir)) {
+    for (const nf of fs.readdirSync(notesDir)) {
+      if (nf.endsWith('_notes.md') && !nf.includes('_L')) {
+        fs.unlinkSync(path.join(notesDir, nf));
+        deleted.push('notes/' + nf);
+        // Also delete score file
+        const scoreFile = path.join(notesDir, nf.replace('.md', '.score.json'));
+        if (fs.existsSync(scoreFile)) {
+          fs.unlinkSync(scoreFile);
+          deleted.push('notes/' + nf.replace('.md', '.score.json'));
+        }
+      }
+    }
+  }
+
+  return { deleted, lecNums: [...lecNums] };
+}
+
 // ── Uninstall helpers ─────────────────────────────────────────────────────────
 // Returns directory size in MB using native OS tools (non-blocking, fast).
 function getDirSizeMBNative(dirPath) {
@@ -840,6 +1011,8 @@ function registerIpc() {
   ipcMain.handle('path:outputDir',      ()       => getOutputDir());
   ipcMain.handle('path:dataDir',        ()       => DATA_DIR);
   ipcMain.handle('course:listLectures', (_, cid) => discoverLectures(cid));
+  ipcMain.handle('course:listVideos',   (_, cid) => listCourseVideos(cid));
+  ipcMain.handle('course:deleteVideo',  (_, { cid, stem }) => deleteVideoData(cid, stem));
 
   // ── Align: scan captions + slides, load/save mapping ───────────────────
   ipcMain.handle('align:scan', (_, cid) => {
